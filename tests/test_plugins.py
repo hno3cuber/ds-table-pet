@@ -73,6 +73,19 @@ def test_start_all_calls_each(tmp_path):
     assert all(p.stopped for p in plugins)
 
 
+def test_skips_broken_plugins(tmp_path):
+    d = _make_fake_plugin(tmp_path, "fake_one")
+    broken = d / "broken_plugin"
+    broken.mkdir()
+    (broken / "plugin.py").write_text("def broken(:\n", encoding="utf-8")
+    raising = d / "raising_plugin"
+    raising.mkdir()
+    (raising / "plugin.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+    mgr = PluginManager(d, enabled=None)
+    plugins = mgr.discover()
+    assert [p.id for p in plugins] == ["fake_one"]
+
+
 def test_factory_customizes_construction(tmp_path):
     d = _make_fake_plugin(tmp_path, "fake_one")
     calls = []

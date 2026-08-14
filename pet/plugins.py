@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 from pathlib import Path
 
 from pet.plugin import Plugin
@@ -20,12 +21,16 @@ class PluginManager:
             spec = importlib.util.spec_from_file_location(f"plugin_{entry.name}", mod_file)
             if spec is None or spec.loader is None:
                 continue
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            plugin_class = getattr(module, "PluginClass", None)
-            if plugin_class is None or not issubclass(plugin_class, Plugin):
+            try:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                plugin_class = getattr(module, "PluginClass", None)
+                if plugin_class is None or not issubclass(plugin_class, Plugin):
+                    continue
+                inst = self.factory(plugin_class)
+            except Exception as e:
+                print(f"[plugin] skip broken plugin: {entry.name}: {e}", file=sys.stderr)
                 continue
-            inst = self.factory(plugin_class)
             if self.enabled is not None and inst.id not in self.enabled:
                 continue
             instances.append(inst)
