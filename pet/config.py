@@ -20,16 +20,52 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+def _is_number(value) -> bool:
+    """数字（排除 bool，bool 是 int 子类）。"""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _value_ok(value, default) -> bool:
+    """按默认值的类型与取值约束校验加载值；非法视为缺失（走默认值）。"""
+    if isinstance(default, bool):
+        return isinstance(value, bool)
+    if isinstance(default, (int, float)):
+        return _is_number(value) and value > 0
+    if isinstance(default, list):
+        if not isinstance(value, list):
+            return False
+        if not default:
+            return True
+        if isinstance(default[0], str):
+            return all(isinstance(x, str) for x in value)
+        return len(value) == len(default) and all(_is_number(x) for x in value)
+    if isinstance(default, str):
+        return isinstance(value, str)
+    return True
+
+
+def _sanitize(value, default):
+    """把加载值与默认配置逐字段比对，非法值回退为默认值（默认值兜底）。"""
+    if isinstance(default, dict):
+        base = default if not isinstance(value, dict) else value
+        return {k: _sanitize(base.get(k, v), v) for k, v in default.items()}
+    if _value_ok(value, default):
+        return copy.deepcopy(value)
+    return copy.deepcopy(default)
+
+
 class Config:
     def __init__(self, path):
         self.path = Path(path)
         loaded = {}
         if self.path.exists():
             try:
-                loaded = json.loads(self.path.read_text(encoding="utf-8"))
+                parsed = json.loads(self.path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
-                loaded = {}
-        self.data = _deep_merge(DEFAULT_CONFIG, loaded)
+                parsed = {}
+            if isinstance(parsed, dict):  # 顶层非对象（如数组/标量）整体按缺失处理
+                loaded = parsed
+        self.data = _sanitize(_deep_merge(DEFAULT_CONFIG, loaded), DEFAULT_CONFIG)
 
     def get(self, key, default=None):
         node = self.data

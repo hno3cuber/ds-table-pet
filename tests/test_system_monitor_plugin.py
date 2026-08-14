@@ -32,6 +32,16 @@ def test_refresh_updates_labels(qapp):
     assert "70" in labels[1].text()
 
 
+def test_refresh_shows_gpu_unavailable_when_gpu_ok_false(qapp):
+    """验收第 8 条：GPU 不可用时标签显示「GPU 不可用」。"""
+    p = SystemMonitorPlugin()
+    w = p.panel(None)
+    labels = [w.layout().itemAt(i).widget() for i in range(2)]
+    p.collector._snapshot = {"cpu": 10.0, "gpu": 0.0, "gpu_ok": False}
+    p._refresh()
+    assert labels[1].text() == "GPU 不可用"
+
+
 def test_pause_shows_paused_state(qapp):
     from PySide6.QtCore import QTimer
     p = SystemMonitorPlugin(interval_ms=500)

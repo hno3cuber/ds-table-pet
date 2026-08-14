@@ -1674,28 +1674,34 @@ git commit -m "feat: main entry with plugin assembly and state persistence"
 **Interfaces:**
 - 无新接口；运行完整验收清单
 
-- [ ] **Step 1: 全量测试**
+- [x] **Step 1: 全量测试**
 
 Run: `pytest`
 Expected: 全部通过（config 4 + geometry 5 + plugins 5 + collector 5 + system_monitor 6 + actor 5 + hud 4 + window 5 + main 4 = 43 passed）
+实际：54 passed（43 为过时预期；本轮验收前基线为 47 passed，Step 3 修复后新增 7 条回归测试，最终 54 passed，全部通过）
 
-- [ ] **Step 2: 按设计文档第 11 节执行 8 条验收**
+- [x] **Step 2: 按设计文档第 11 节执行 8 条验收**
 
 Run: `python main.py` 逐条核对：
-1. 透明底正确显示，无黑/白底块 ✅/❌
-2. 拖拽移动跟随 ✅/❌
-3. 悬停面板淡入，CPU%/GPU% 每秒刷新，移开淡出 ✅/❌
-4. 右键菜单三项齐全；暂停后数字停止刷新；恢复继续 ✅/❌
-5. 调整大小：角点框出现，锁比例缩放，松手生效 ✅/❌
-6. 重启后尺寸与位置保持 ✅/❌
-7. 改坏 config.json 字段值后启动不崩溃，默认值兜底 ✅/❌
-8. GPU 读不到时不崩溃，显示「GPU 不可用」✅/❌（可临时改 `read_gpu` 抛异常验证）
+1. 透明底正确显示，无黑/白底块 ⏳ 待用户真机验收
+2. 拖拽移动跟随 ⏳ 待用户真机验收
+3. 悬停面板淡入，CPU%/GPU% 每秒刷新，移开淡出 ⏳ 待用户真机验收
+4. 右键菜单三项齐全；暂停后数字停止刷新；恢复继续 ⏳ 待用户真机验收
+5. 调整大小：角点框出现，锁比例缩放，松手生效 ⏳ 待用户真机验收
+6. 重启后尺寸与位置保持 ⏳ 待用户真机验收
+7. 改坏 config.json 字段值后启动不崩溃，默认值兜底 ✅（沙盒冒烟：坏值构造 Config + build_window + install_plugins 全链路不抛异常，兜底默认值；修复见 Step 3）
+8. GPU 读不到时不崩溃，显示「GPU 不可用」✅（沙盒冒烟：monkeypatch `read_gpu` 抛异常后 collector 存活、标签显示「GPU 不可用」；修复见 Step 3）
 
-- [ ] **Step 3: 修复验收中发现的问题并重跑对应测试**
+- [x] **Step 3: 修复验收中发现的问题并重跑对应测试**
 
-- [ ] **Step 4: 最终提交**
+验收冒烟发现两处问题并已修复：
+- `pet/config.py`：Config 对错误类型的字段值（如 `scale="abc"`、`pos="oops"`、`refresh_interval_ms=-5`、`enabled_plugins=null`、顶层非对象）无类型级兜底，`PetWindow` 构造会抛 `ValueError`。新增 `_sanitize/_value_ok` 按默认配置类型校验并回退默认值。
+- `plugins/system_monitor/collector.py`：`_update()` 不保护 `read_gpu()`，异常会杀死采集线程。新增 try/except 兜底，异常时标记 `gpu_ok=False`。
+重跑：全量 54 passed，两条冒烟均 PASS。
+
+- [x] **Step 4: 最终提交**
 
 ```bash
-git add -A
+git add 精确文件（plan 文档 + 修复源码 + 回归测试）
 git commit -m "docs: plan completion and acceptance record"
 ```

@@ -29,7 +29,11 @@ class CpuGpuCollector:
 
     def _update(self):
         cpu = self.read_cpu()
-        gpu, gpu_ok = self.read_gpu()
+        try:
+            gpu, gpu_ok = self.read_gpu()
+        except Exception:
+            # read_gpu 自身已吞异常；此处兜底意外异常，避免采集线程死亡
+            gpu, gpu_ok = 0.0, False
         with self._lock:
             self._snapshot = {"cpu": cpu, "gpu": gpu, "gpu_ok": gpu_ok}
 

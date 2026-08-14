@@ -89,3 +89,45 @@ def test_install_plugins_discovers_real_monitor(qapp, tmp_path):
         assert w._hud.layout().count() >= 2  # paused 标签 + 数据块
     finally:
         mgr.stop_all()  # 收尾停采集线程，避免测试进程残留
+
+
+def test_build_window_with_bad_config_values_does_not_raise(qapp, tmp_path):
+    """验收第 7 条冒烟链：坏字段值构建 PetWindow 不抛异常，按默认值兜底。"""
+    import json
+    from PySide6.QtGui import QPixmap
+    from pet.config import Config
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({
+        "window": {"scale": "abc", "pos": "oops"},
+        "refresh_interval_ms": -5,
+        "enabled_plugins": None,
+    }), encoding="utf-8")
+    cfg = Config(p)
+    pm = QPixmap(100, 200)
+    pm.fill()
+    w = main.build_window(pm, cfg)
+    assert w.current_scale() == 1.0
+    assert w.current_pos() == [100, 100]
+
+
+def test_install_plugins_with_bad_config_values_does_not_raise(qapp, tmp_path):
+    """验收第 7 条冒烟链：坏字段值 install_plugins 不抛异常，interval 兜底为默认。"""
+    import json
+    from PySide6.QtGui import QPixmap
+    from pet.config import Config
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({
+        "window": {"scale": "abc", "pos": "oops"},
+        "refresh_interval_ms": -5,
+        "enabled_plugins": None,
+    }), encoding="utf-8")
+    cfg = Config(p)
+    pm = QPixmap(100, 100)
+    pm.fill()
+    w = main.build_window(pm, cfg)
+    mgr = main.install_plugins(w, cfg)
+    try:
+        assert mgr.instances[0].id == "system_monitor"
+        assert mgr.instances[0].interval_ms == 1000  # 兜底默认间隔
+    finally:
+        mgr.stop_all()

@@ -48,3 +48,19 @@ def test_read_gpu_returns_false_on_error(monkeypatch):
     val, ok = c.read_gpu()
     assert val == 0.0
     assert ok is False
+
+
+def test_read_gpu_raising_does_not_kill_update(monkeypatch):
+    """验收第 8 条：read_gpu 抛异常时 _update 存活，快照标记 GPU 不可用。"""
+    c = CpuGpuCollector()
+    monkeypatch.setattr(c, "read_cpu", lambda: 42.0)
+
+    def boom():
+        raise RuntimeError("gpu read failed")
+
+    monkeypatch.setattr(c, "read_gpu", boom)
+    c._update()  # 不抛异常
+    snap = c.snapshot()
+    assert snap["cpu"] == 42.0
+    assert snap["gpu"] == 0.0
+    assert snap["gpu_ok"] is False
