@@ -47,3 +47,20 @@ def test_breathing_toggle(qapp):
     assert not actor._breath_anim.state() == actor._breath_anim.State.Running
     actor.set_breathing(True)
     assert actor._breath_anim.state() == actor._breath_anim.State.Running
+
+
+def test_breath_property_registered_and_driven(qapp):
+    """回归：breath 必须注册到 Qt 元对象系统，动画才能驱动它（真机曾报
+    QPropertyAnimation: non-existing property breath）。"""
+    from PySide6.QtTest import QTest
+
+    pm = QPixmap(200, 300)
+    pm.fill()
+    actor = ActorWidget(pm)
+    # 元对象系统里能找到 breath 属性
+    assert actor.metaObject().indexOfProperty("breath") >= 0
+    # 动画跑一段时间后，breath 值确实被驱动（非初始 0.0）
+    actor.set_breath(0.0)
+    actor.set_breathing(True)
+    QTest.qWait(120)
+    assert actor._breath != 0.0

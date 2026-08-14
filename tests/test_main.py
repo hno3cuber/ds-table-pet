@@ -37,6 +37,20 @@ def test_close_saves_position_and_scale(qapp, tmp_path):
     assert cfg2.get("window.scale") == 1.7
 
 
+def test_state_saver_is_qobject_and_filters(qapp, tmp_path):
+    """回归：_StateSaver 必须继承 QObject，installEventFilter 才接受；
+    真机曾报 TypeError（传了非 QObject 的过滤器）。"""
+    from PySide6.QtCore import QObject
+
+    cfg = Config(tmp_path / "config.json")
+    pm = QPixmap(100, 200)
+    pm.fill()
+    w = main.build_window(pm, cfg)
+    saver = main._StateSaver(w, cfg)
+    assert isinstance(saver, QObject)
+    w.installEventFilter(saver)  # 不抛 TypeError 即通过
+
+
 def test_install_plugins_passes_interval(qapp, tmp_path):
     import sys
     from pathlib import Path

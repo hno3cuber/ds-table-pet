@@ -1,5 +1,6 @@
 import sys
 
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
@@ -61,16 +62,15 @@ def main():
     sys.exit(app.exec())
 
 
-class _StateSaver:
-    """在窗口 closeEvent 后兜底保存状态。"""
+class _StateSaver(QObject):
+    """在窗口 closeEvent 后兜底保存状态。必须继承 QObject（installEventFilter 要求过滤器是 QObject）。"""
 
     def __init__(self, window: PetWindow, config: Config):
+        super().__init__()
         self.window = window
         self.config = config
 
     def eventFilter(self, obj, event):
-        from PySide6.QtCore import QEvent
-
         if obj is self.window and event.type() == QEvent.Close:
             save_state(self.window, self.config)
         return False

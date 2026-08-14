@@ -1,4 +1,4 @@
-from PySide6.QtCore import QPoint, QPropertyAnimation, QRect, QSize, Qt
+from PySide6.QtCore import Property, QPoint, QPropertyAnimation, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
@@ -33,7 +33,8 @@ class ActorWidget(QWidget):
         self._breath = value
         self.update()
 
-    breath = property(get_breath, set_breath)
+    # 必须用 PySide6 的 Property 注册到 Qt 元对象系统，QPropertyAnimation 才能驱动 breath
+    breath = Property(float, get_breath, set_breath)
 
     def current_scale(self) -> float:
         return self._scale
