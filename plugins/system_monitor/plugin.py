@@ -59,7 +59,7 @@ class SystemMonitorPlugin(Plugin):
                 label.setText("已暂停")
         else:
             if self._timer is not None:
-                self._timer.start(1000)
+                self._timer.start(self.interval_ms)
             self._refresh()
 
     def _refresh(self):

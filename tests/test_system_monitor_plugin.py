@@ -33,12 +33,22 @@ def test_refresh_updates_labels(qapp):
 
 
 def test_pause_shows_paused_state(qapp):
-    p = SystemMonitorPlugin()
-    p.panel(None)
+    from PySide6.QtCore import QTimer
+    p = SystemMonitorPlugin(interval_ms=500)
+    w = p.panel(None)
+    p._timer = QTimer()
+    p._timer.timeout.connect(p._refresh)
+    p._timer.start(p.interval_ms)
+    assert p._timer.isActive()
     p.set_paused(True)
     assert p._paused is True
+    assert p._timer.isActive() is False
+    labels = [w.layout().itemAt(i).widget() for i in range(2)]
+    assert labels[0].text() == "已暂停"
+    assert labels[1].text() == "已暂停"
     p.set_paused(False)
     assert p._paused is False
+    assert p._timer.isActive() is True
 
 
 def test_interval_ms_from_constructor():
