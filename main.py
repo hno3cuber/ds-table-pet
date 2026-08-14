@@ -1,0 +1,79 @@
+import sys
+
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QApplication
+
+from pet.config import Config
+from pet.plugins import PluginManager
+from pet.window import PetWindow
+
+CONFIG_PATH = "config.json"
+PIXMAP_PATH = "picture/ds.png"
+
+
+def load_pixmap(path: str) -> QPixmap:
+    pm = QPixmap(path)
+    if pm.isNull():
+        raise FileNotFoundError(f"角色图片加载失败: {path}")
+    return pm
+
+
+def build_window(pixmap: QPixmap, config: Config) -> PetWindow:
+    return PetWindow(pixmap, config)
+
+
+def install_plugins(window: PetWindow, config: Config):
+    interval_ms = int(config.get("refresh_interval_ms", 1000))
+
+    def factory(plugin_class):
+        if getattr(plugin_class, "id", None) == "system_monitor":
+            return plugin_class(interval_ms=interval_ms)
+        return plugin_class()
+
+    mgr = PluginManager("plugins", enabled=config.get("enabled_plugins", None), factory=factory)
+    plugins = mgr.discover()
+    for plugin in plugins:
+        window.install_plugin(plugin)
+    mgr.start_all()
+    return mgr
+
+
+def save_state(window: PetWindow, config: Config):
+    config.set("window.pos", window.current_pos())
+    config.set("window.scale", window.current_scale())
+    config.save()
+
+
+def main():
+    app = QApplication(sys.argv)
+    config = Config(CONFIG_PATH)
+    pixmap = load_pixmap(PIXMAP_PATH)
+    window = build_window(pixmap, config)
+    install_plugins(window, config)
+    window.show()
+    window.installEventFilter(_StateSaver(window, config))
+
+    def on_close():
+        save_state(window, config)
+
+    app.aboutToQuit.connect(on_close)
+    sys.exit(app.exec())
+
+
+class _StateSaver:
+    """在窗口 closeEvent 后兜底保存状态。"""
+
+    def __init__(self, window: PetWindow, config: Config):
+        self.window = window
+        self.config = config
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+
+        if obj is self.window and event.type() == QEvent.Close:
+            save_state(self.window, self.config)
+        return False
+
+
+if __name__ == "__main__":
+    main()
