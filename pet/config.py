@@ -5,7 +5,7 @@ from pathlib import Path
 DEFAULT_CONFIG = {
     "refresh_interval_ms": 1000,
     "window": {"pos": [100, 100], "scale": 1.0},
-    "breathing_animation": True,
+    "breathing_animation": False,
     "enabled_plugins": ["system_monitor"],
 }
 

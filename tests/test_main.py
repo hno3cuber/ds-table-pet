@@ -51,6 +51,21 @@ def test_state_saver_is_qobject_and_filters(qapp, tmp_path):
     w.installEventFilter(saver)  # 不抛 TypeError 即通过
 
 
+def test_install_sigint_quit_registers_handler(qapp):
+    """Ctrl+C 退出：install_sigint_quit 必须替换默认 SIGINT 处理器并返回保活 timer。"""
+    import signal
+
+    original = signal.getsignal(signal.SIGINT)
+    try:
+        wake = main.install_sigint_quit(qapp)
+        handler = signal.getsignal(signal.SIGINT)
+        assert handler is not signal.default_int_handler
+        assert handler is not signal.SIG_DFL
+        assert wake is not None
+    finally:
+        signal.signal(signal.SIGINT, original)
+
+
 def test_install_plugins_passes_interval(qapp, tmp_path):
     import sys
     from pathlib import Path

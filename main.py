@@ -1,6 +1,7 @@
+import signal
 import sys
 
-from PySide6.QtCore import QEvent, QObject
+from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
@@ -45,6 +46,18 @@ def save_state(window: PetWindow, config: Config):
     config.save()
 
 
+def install_sigint_quit(app: QApplication):
+    """让终端 Ctrl+C 能干净退出。Qt 事件循环阻塞时，Python 的信号处理要等 Python
+    字节码执行才会触发，所以用 200ms 的 QTimer 周期性唤醒主线程，SIGINT 到达后
+    app.quit() 走正常退出链路（保存状态 + 停插件）。"""
+    wake = QTimer()
+    wake.setInterval(200)
+    wake.timeout.connect(lambda: None)
+    wake.start()
+    signal.signal(signal.SIGINT, lambda *_: app.quit())
+    return wake
+
+
 def main():
     app = QApplication(sys.argv)
     config = Config(CONFIG_PATH)
@@ -53,6 +66,7 @@ def main():
     mgr = install_plugins(window, config)
     window.show()
     window.installEventFilter(_StateSaver(window, config))
+    _wake = install_sigint_quit(app)  # 持有引用防 GC
 
     def on_close():
         save_state(window, config)
