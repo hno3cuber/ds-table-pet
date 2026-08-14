@@ -78,18 +78,18 @@ def test_hud_is_top_level_window(qapp, tmp_path):
     hud = w._hud
     assert hud.isWindow() is True
     assert hud.windowFlags() & Qt.Tool
-    assert hud.isHidden() is True  # 构造后初始隐藏
+    assert hud.isHidden() is False  # 常驻显示：构造后即浮现
 
 
 def test_hud_follows_window_position(qapp, tmp_path):
-    """主窗口移动后，HUD 以全局坐标跟随到窗口右缘外侧（x = 窗口 x + 宽 + 6）。"""
+    """主窗口移动后，HUD 以全局坐标跟随到窗口右缘（轻微重叠 x = 窗口 x + 宽 - 24）。"""
     pm = QPixmap(100, 100)
     pm.fill()
     w = PetWindow(pm, Config(tmp_path / "config.json"))
     w.show()
     w.move(200, 150)
     hud = w._hud
-    assert hud.pos().x() == w.pos().x() + w.width() + 6
+    assert hud.pos().x() == w.pos().x() + w.width() - 24
     assert hud.pos().y() == w.pos().y()
 
 

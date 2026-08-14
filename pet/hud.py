@@ -1,11 +1,36 @@
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 _PANEL_STYLE = """
-QWidget#HudPanel { background: rgba(20, 20, 30, 200); border-radius: 8px; }
-QLabel { color: #ffffff; background: transparent; }
+QWidget#HudPanel { background: rgba(235, 235, 235, 220); border-radius: 8px; }
+QLabel { color: #1a1a1a; background: transparent; }
 """
 _BASE_FONT_SIZE = 13.0
+
+# 8 方向描边位移
+_OUTLINE_DIRS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+
+class OutlinedLabel(QLabel):
+    """带描边的文本标签：先 8 方向画描边色，再原位画填充色，任何背景下都清晰。"""
+
+    def __init__(self, text="", parent=None, outline=None, fill=None):
+        super().__init__(text, parent)
+        self.outline = outline or QColor(255, 255, 255, 210)
+        self.fill = fill or QColor(26, 26, 26)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setFont(self.font())
+        rect = self.rect()
+        align = self.alignment()
+        for dx, dy in _OUTLINE_DIRS:
+            painter.setPen(QPen(self.outline, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.drawText(rect.translated(dx, dy), align, self.text())
+        painter.setPen(QPen(self.fill, 1.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawText(rect, align, self.text())
 
 
 class HudPanel(QWidget):
@@ -20,7 +45,7 @@ class HudPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(2)
-        self._paused_label = QLabel("已暂停", self)
+        self._paused_label = OutlinedLabel("已暂停", self)
         self._paused_label.setAlignment(self._paused_label.alignment().AlignCenter)
         layout.addWidget(self._paused_label)
         self._paused_label.hide()

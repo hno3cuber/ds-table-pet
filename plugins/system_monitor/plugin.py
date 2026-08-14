@@ -1,13 +1,9 @@
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from pet.hud import OutlinedLabel
 from pet.plugin import Plugin
 from plugins.system_monitor.collector import CpuGpuCollector
-
-_PANEL_STYLE = """
-QLabel { color: #ffffff; background: transparent; font-size: 13px; padding: 2px 8px; }
-"""
-
 
 class SystemMonitorPlugin(Plugin):
     id = "system_monitor"
@@ -40,11 +36,10 @@ class SystemMonitorPlugin(Plugin):
     def panel(self, parent) -> QWidget:
         widget = QWidget(parent)
         self._widget = widget  # 持有引用，防止顶层控件被 GC 后 QLabel 失效
-        widget.setStyleSheet(_PANEL_STYLE)
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(2)
-        self._labels = [QLabel("CPU --", widget), QLabel("GPU --", widget)]
+        self._labels = [OutlinedLabel("CPU --", widget), OutlinedLabel("GPU --", widget)]
         for label in self._labels:
             layout.addWidget(label)
         self._refresh()

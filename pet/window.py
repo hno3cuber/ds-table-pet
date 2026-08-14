@@ -35,6 +35,7 @@ class PetWindow(QWidget):
 
         self._hud = HudPanel()
         self._hud.set_scale(self._scale)
+        self._hud.fade_in()  # 常驻显示：启动即浮现监测面板，不再依赖鼠标悬停
 
         w, h = scaled_size(pixmap.width(), pixmap.height(), self._scale)
         self.resize(w, h)
@@ -132,19 +133,10 @@ class PetWindow(QWidget):
         else:
             super().keyPressEvent(event)
 
-    def enterEvent(self, event):
-        self._hud.fade_in()
-        self._position_hud()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self._hud.fade_out()
-        super().leaveEvent(event)
-
     def _position_hud(self):
         self._hud.adjustSize()
-        # HUD 是独立顶层窗口，用全局坐标同步到主窗口右缘外侧
-        self._hud.move(self.mapToGlobal(QPoint(self.width() + 6, 0)))
+        # HUD 是独立顶层窗口，用全局坐标同步到主窗口右缘（轻微重叠，贴着角色）
+        self._hud.move(self.mapToGlobal(QPoint(self.width() - 24, 0)))
 
     def resizeEvent(self, event):
         self._position_hud()
