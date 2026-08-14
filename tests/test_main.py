@@ -69,3 +69,23 @@ def test_install_plugins_passes_interval(qapp, tmp_path):
     mgr = PluginManager(fake_dir, enabled=["system_monitor"], factory=factory)
     plugins = mgr.discover()
     assert plugins[0].interval_ms == 500
+
+
+def test_install_plugins_discovers_real_monitor(qapp, tmp_path):
+    """契约冲突回归测试：真实 plugins 目录能被 discover，interval_ms 从 config 透传。"""
+    from PySide6.QtGui import QPixmap
+    from pet.config import Config
+    from pet.window import PetWindow
+    pm = QPixmap(100, 100)
+    pm.fill()
+    cfg = Config(tmp_path / "config.json")
+    cfg.set("refresh_interval_ms", 750)
+    w = PetWindow(pm, cfg)
+    mgr = main.install_plugins(w, cfg)
+    try:
+        assert len(mgr.instances) == 1
+        assert mgr.instances[0].id == "system_monitor"
+        assert mgr.instances[0].interval_ms == 750
+        assert w._hud.layout().count() >= 2  # paused 标签 + 数据块
+    finally:
+        mgr.stop_all()  # 收尾停采集线程，避免测试进程残留

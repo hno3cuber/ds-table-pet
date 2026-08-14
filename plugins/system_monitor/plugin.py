@@ -70,3 +70,8 @@ class SystemMonitorPlugin(Plugin):
         gpu_text = "GPU 不可用" if not snap["gpu_ok"] else f"GPU {snap['gpu']:.0f}%"
         self._labels[0].setText(cpu_text)
         self._labels[1].setText(gpu_text)
+
+
+# discover() 契约（Task 4）：插件模块需导出 PluginClass；
+# 本插件类名 SystemMonitorPlugin 为 spec/Task 6 命名，此处别名对齐两边契约。
+PluginClass = SystemMonitorPlugin
