@@ -17,6 +17,7 @@ class PetWindow(QWidget):
         self._resize_mode = False
         self._drag_offset = None
         self._resize_corner = None
+        self._resize_origin_global_x = 0
         self._plugins = []
 
         self.setWindowFlags(
@@ -96,7 +97,9 @@ class PetWindow(QWidget):
         if self._resize_mode:
             corner = self._actor.handle_at(local)
             if corner is not None:
-                self._resize_corner = corner
+                self._begin_resize(corner)
+                # 记录按下瞬间光标全局 X，作为本次缩放拖拽的增量基准
+                self._resize_origin_global_x = event.globalPosition().toPoint().x()
                 self._drag_offset = None
                 return
         self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -104,7 +107,8 @@ class PetWindow(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._resize_corner is not None:
-            self._apply_resize(event.globalPosition().toPoint().x() - self.x())
+            drag_dx = event.globalPosition().toPoint().x() - self._resize_origin_global_x
+            self._apply_resize(drag_dx)
             return
         if self._drag_offset is not None:
             self.move(event.globalPosition().toPoint() - self._drag_offset)

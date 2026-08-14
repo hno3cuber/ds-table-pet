@@ -25,6 +25,31 @@ def test_window_min_scale_after_resize_drag(qapp, tmp_path):
     assert w.current_scale() >= 0.3
 
 
+def test_resize_drag_incremental_scale(qapp, tmp_path):
+    """真实事件流：右下角手柄按下后右移 50px，scale 应为 1.5（增量语义）。
+
+    使用 QTest 合成 press/move/release，验证 mouseMoveEvent 里 drag_dx 是相对
+    press 瞬间的增量，而不是光标距窗口左缘的绝对距离。
+    """
+    import pytest
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    pm = QPixmap(100, 100)
+    pm.fill()
+    cfg = Config(tmp_path / "config.json")
+    w = PetWindow(pm, cfg)
+    w.show()
+    w._enter_resize_mode()
+    # 右下角手柄命中区（局部坐标，窗口 100x100）
+    QTest.mousePress(w, Qt.LeftButton, pos=QPoint(95, 95))
+    # 右移 50px：增量 50，scale = 1.0 + 50/100 = 1.5，窗口宽 150
+    QTest.mouseMove(w, QPoint(145, 95))
+    assert w.current_scale() == pytest.approx(1.5, abs=0.1)
+    assert w.width() == pytest.approx(150, abs=1)
+    QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(145, 95))
+
+
 def test_breathing_follows_config(qapp, tmp_path):
     pm = QPixmap(100, 100)
     pm.fill()
