@@ -1,0 +1,127 @@
+﻿=== git log ===
+
+=== git diff --stat ===
+ plugins/system_monitor/collector.py | 57 +++++++++++++++++++++++++++++++++++++
+ tests/test_collector.py             | 50 ++++++++++++++++++++++++++++++++
+ 2 files changed, 107 insertions(+)
+
+=== git diff ===
+diff --git a/plugins/system_monitor/collector.py b/plugins/system_monitor/collector.py
+new file mode 100644
+index 0000000..95d7a25
+--- /dev/null
++++ b/plugins/system_monitor/collector.py
+@@ -0,0 +1,57 @@
++import threading
++import time
++
++import psutil
++import pynvml
++
++
++class CpuGpuCollector:
++    def __init__(self, interval_s: float = 1.0):
++        self.interval_s = interval_s
++        self._snapshot = {"cpu": 0.0, "gpu": 0.0, "gpu_ok": False}
++        self._lock = threading.Lock()
++        self._stop = threading.Event()
++        self._thread = None
++        self._nvml_handle = None
++
++    def read_cpu(self) -> float:
++        return psutil.cpu_percent(interval=None)
++
++    def read_gpu(self) -> tuple[float, bool]:
++        try:
++            if self._nvml_handle is None:
++                pynvml.nvmlInit()
++                self._nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
++            util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
++            return float(util.gpu), True
++        except Exception:
++            return 0.0, False
++
++    def _update(self):
++        cpu = self.read_cpu()
++        gpu, gpu_ok = self.read_gpu()
++        with self._lock:
++            self._snapshot = {"cpu": cpu, "gpu": gpu, "gpu_ok": gpu_ok}
++
++    def _loop(self):
++        self.read_cpu()  # 预热：psutil 首次调用返回 0
++        while not self._stop.is_set():
++            time.sleep(self.interval_s)
++            self._update()
++
++    def start(self):
++        if self._thread is not None and self._thread.is_alive():
++            return
++        self._stop.clear()
++        self._thread = threading.Thread(target=self._loop, daemon=True, name="cpu-gpu-collector")
++        self._thread.start()
++
++    def stop(self):
++        self._stop.set()
++        if self._thread is not None:
++            self._thread.join(timeout=2.0)
++            # 保留 _thread 引用（test_start_stop_lifecycle 断言 stop 后仍可访问）
++
++    def snapshot(self) -> dict:
++        with self._lock:
++            return dict(self._snapshot)
+diff --git a/tests/test_collector.py b/tests/test_collector.py
+new file mode 100644
+index 0000000..065aa43
+--- /dev/null
++++ b/tests/test_collector.py
+@@ -0,0 +1,50 @@
++import time
++import pytest
++from plugins.system_monitor.collector import CpuGpuCollector
++
++
++def test_update_writes_snapshot(monkeypatch):
++    c = CpuGpuCollector()
++    monkeypatch.setattr(c, "read_cpu", lambda: 12.0)
++    monkeypatch.setattr(c, "read_gpu", lambda: (34.0, True))
++    c._update()
++    snap = c.snapshot()
++    assert snap["cpu"] == 12.0
++    assert snap["gpu"] == 34.0
++    assert snap["gpu_ok"] is True
++
++
++def test_gpu_failure_reported(monkeypatch):
++    c = CpuGpuCollector()
++    monkeypatch.setattr(c, "read_cpu", lambda: 1.0)
++    monkeypatch.setattr(c, "read_gpu", lambda: (0.0, False))
++    c._update()
++    assert c.snapshot()["gpu_ok"] is False
++
++
++def test_snapshot_is_copy(monkeypatch):
++    c = CpuGpuCollector()
++    monkeypatch.setattr(c, "read_cpu", lambda: 5.0)
++    monkeypatch.setattr(c, "read_gpu", lambda: (6.0, True))
++    c._update()
++    snap = c.snapshot()
++    snap["cpu"] = 99.0
++    assert c.snapshot()["cpu"] == 5.0
++
++
++def test_start_stop_lifecycle():
++    c = CpuGpuCollector(interval_s=0.01)
++    c.start()
++    time.sleep(0.05)
++    c.stop()
++    assert c._thread is not None
++    assert not c._thread.is_alive()
++
++
++def test_read_gpu_returns_false_on_error(monkeypatch):
++    c = CpuGpuCollector()
++    import plugins.system_monitor.collector as collector_mod
++    monkeypatch.setattr(collector_mod.pynvml, "nvmlInit", lambda: (_ for _ in ()).throw(RuntimeError("no gpu")))
++    val, ok = c.read_gpu()
++    assert val == 0.0
++    assert ok is False

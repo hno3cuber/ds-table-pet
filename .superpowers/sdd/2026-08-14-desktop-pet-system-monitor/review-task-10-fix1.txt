@@ -1,0 +1,63 @@
+﻿=== git log ===
+
+=== git diff --stat ===
+ plugins/system_monitor/plugin.py |  5 +++++
+ tests/test_main.py               | 20 ++++++++++++++++++++
+ 2 files changed, 25 insertions(+)
+
+=== git diff ===
+diff --git a/plugins/system_monitor/plugin.py b/plugins/system_monitor/plugin.py
+index 7b9b875..e955b09 100644
+--- a/plugins/system_monitor/plugin.py
++++ b/plugins/system_monitor/plugin.py
+@@ -63,10 +63,15 @@ class SystemMonitorPlugin(Plugin):
+             self._refresh()
+ 
+     def _refresh(self):
+         if not self._labels:
+             return
+         snap = self.poll()
+         cpu_text = f"CPU {snap['cpu']:.0f}%"
+         gpu_text = "GPU 不可用" if not snap["gpu_ok"] else f"GPU {snap['gpu']:.0f}%"
+         self._labels[0].setText(cpu_text)
+         self._labels[1].setText(gpu_text)
++
++
++# discover() 契约（Task 4）：插件模块需导出 PluginClass；
++# 本插件类名 SystemMonitorPlugin 为 spec/Task 6 命名，此处别名对齐两边契约。
++PluginClass = SystemMonitorPlugin
+diff --git a/tests/test_main.py b/tests/test_main.py
+index e6c4cef..9872187 100644
+--- a/tests/test_main.py
++++ b/tests/test_main.py
+@@ -62,10 +62,30 @@ def test_install_plugins_passes_interval(qapp, tmp_path):
+     w = PetWindow(pm, cfg)
+ 
+     def factory(plugin_class):
+         if getattr(plugin_class, "id", None) == "system_monitor":
+             return plugin_class(interval_ms=int(cfg.get("refresh_interval_ms", 1000)))
+         return plugin_class()
+ 
+     mgr = PluginManager(fake_dir, enabled=["system_monitor"], factory=factory)
+     plugins = mgr.discover()
+     assert plugins[0].interval_ms == 500
++
++
++def test_install_plugins_discovers_real_monitor(qapp, tmp_path):
++    """契约冲突回归测试：真实 plugins 目录能被 discover，interval_ms 从 config 透传。"""
++    from PySide6.QtGui import QPixmap
++    from pet.config import Config
++    from pet.window import PetWindow
++    pm = QPixmap(100, 100)
++    pm.fill()
++    cfg = Config(tmp_path / "config.json")
++    cfg.set("refresh_interval_ms", 750)
++    w = PetWindow(pm, cfg)
++    mgr = main.install_plugins(w, cfg)
++    try:
++        assert len(mgr.instances) == 1
++        assert mgr.instances[0].id == "system_monitor"
++        assert mgr.instances[0].interval_ms == 750
++        assert w._hud.layout().count() >= 2  # paused 标签 + 数据块
++    finally:
++        mgr.stop_all()  # 收尾停采集线程，避免测试进程残留

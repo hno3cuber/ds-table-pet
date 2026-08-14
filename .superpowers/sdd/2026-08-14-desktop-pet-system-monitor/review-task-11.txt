@@ -1,0 +1,353 @@
+﻿=== git log ===
+
+=== git diff --stat ===
+ .../plans/2026-08-14-desktop-pet-system-monitor.md | 32 ++++++++++-------
+ pet/config.py                                      | 42 ++++++++++++++++++++--
+ plugins/system_monitor/collector.py                |  6 +++-
+ tests/test_collector.py                            | 16 +++++++++
+ tests/test_config.py                               | 38 ++++++++++++++++++++
+ tests/test_main.py                                 | 42 ++++++++++++++++++++++
+ tests/test_system_monitor_plugin.py                | 10 ++++++
+ 7 files changed, 169 insertions(+), 17 deletions(-)
+
+=== git diff ===
+diff --git a/docs/superpowers/plans/2026-08-14-desktop-pet-system-monitor.md b/docs/superpowers/plans/2026-08-14-desktop-pet-system-monitor.md
+index 6049ee2..db23b93 100644
+--- a/docs/superpowers/plans/2026-08-14-desktop-pet-system-monitor.md
++++ b/docs/superpowers/plans/2026-08-14-desktop-pet-system-monitor.md
+@@ -1667,35 +1667,41 @@ git commit -m "feat: main entry with plugin assembly and state persistence"
+ ---
+ 
+ ### Task 11: 全量验收与收尾
+ 
+ **Files:**
+ - Modify: `docs/superpowers/plans/2026-08-14-desktop-pet-system-monitor.md`（本文件，验收结果勾选后更新）
+ 
+ **Interfaces:**
+ - 无新接口；运行完整验收清单
+ 
+-- [ ] **Step 1: 全量测试**
++- [x] **Step 1: 全量测试**
+ 
+ Run: `pytest`
+ Expected: 全部通过（config 4 + geometry 5 + plugins 5 + collector 5 + system_monitor 6 + actor 5 + hud 4 + window 5 + main 4 = 43 passed）
++实际：54 passed（43 为过时预期；本轮验收前基线为 47 passed，Step 3 修复后新增 7 条回归测试，最终 54 passed，全部通过）
+ 
+-- [ ] **Step 2: 按设计文档第 11 节执行 8 条验收**
++- [x] **Step 2: 按设计文档第 11 节执行 8 条验收**
+ 
+ Run: `python main.py` 逐条核对：
+-1. 透明底正确显示，无黑/白底块 ✅/❌
+-2. 拖拽移动跟随 ✅/❌
+-3. 悬停面板淡入，CPU%/GPU% 每秒刷新，移开淡出 ✅/❌
+-4. 右键菜单三项齐全；暂停后数字停止刷新；恢复继续 ✅/❌
+-5. 调整大小：角点框出现，锁比例缩放，松手生效 ✅/❌
+-6. 重启后尺寸与位置保持 ✅/❌
+-7. 改坏 config.json 字段值后启动不崩溃，默认值兜底 ✅/❌
+-8. GPU 读不到时不崩溃，显示「GPU 不可用」✅/❌（可临时改 `read_gpu` 抛异常验证）
++1. 透明底正确显示，无黑/白底块 ⏳ 待用户真机验收
++2. 拖拽移动跟随 ⏳ 待用户真机验收
++3. 悬停面板淡入，CPU%/GPU% 每秒刷新，移开淡出 ⏳ 待用户真机验收
++4. 右键菜单三项齐全；暂停后数字停止刷新；恢复继续 ⏳ 待用户真机验收
++5. 调整大小：角点框出现，锁比例缩放，松手生效 ⏳ 待用户真机验收
++6. 重启后尺寸与位置保持 ⏳ 待用户真机验收
++7. 改坏 config.json 字段值后启动不崩溃，默认值兜底 ✅（沙盒冒烟：坏值构造 Config + build_window + install_plugins 全链路不抛异常，兜底默认值；修复见 Step 3）
++8. GPU 读不到时不崩溃，显示「GPU 不可用」✅（沙盒冒烟：monkeypatch `read_gpu` 抛异常后 collector 存活、标签显示「GPU 不可用」；修复见 Step 3）
+ 
+-- [ ] **Step 3: 修复验收中发现的问题并重跑对应测试**
++- [x] **Step 3: 修复验收中发现的问题并重跑对应测试**
+ 
+-- [ ] **Step 4: 最终提交**
++验收冒烟发现两处问题并已修复：
++- `pet/config.py`：Config 对错误类型的字段值（如 `scale="abc"`、`pos="oops"`、`refresh_interval_ms=-5`、`enabled_plugins=null`、顶层非对象）无类型级兜底，`PetWindow` 构造会抛 `ValueError`。新增 `_sanitize/_value_ok` 按默认配置类型校验并回退默认值。
++- `plugins/system_monitor/collector.py`：`_update()` 不保护 `read_gpu()`，异常会杀死采集线程。新增 try/except 兜底，异常时标记 `gpu_ok=False`。
++重跑：全量 54 passed，两条冒烟均 PASS。
++
++- [x] **Step 4: 最终提交**
+ 
+ ```bash
+-git add -A
++git add 精确文件（plan 文档 + 修复源码 + 回归测试）
+ git commit -m "docs: plan completion and acceptance record"
+ ```
+diff --git a/pet/config.py b/pet/config.py
+index dbb3800..9d9e00b 100644
+--- a/pet/config.py
++++ b/pet/config.py
+@@ -13,30 +13,66 @@ DEFAULT_CONFIG = {
+ def _deep_merge(base: dict, override: dict) -> dict:
+     result = copy.deepcopy(base)
+     for k, v in override.items():
+         if isinstance(v, dict) and isinstance(result.get(k), dict):
+             result[k] = _deep_merge(result[k], v)
+         else:
+             result[k] = copy.deepcopy(v)
+     return result
+ 
+ 
++def _is_number(value) -> bool:
++    """数字（排除 bool，bool 是 int 子类）。"""
++    return isinstance(value, (int, float)) and not isinstance(value, bool)
++
++
++def _value_ok(value, default) -> bool:
++    """按默认值的类型与取值约束校验加载值；非法视为缺失（走默认值）。"""
++    if isinstance(default, bool):
++        return isinstance(value, bool)
++    if isinstance(default, (int, float)):
++        return _is_number(value) and value > 0
++    if isinstance(default, list):
++        if not isinstance(value, list):
++            return False
++        if not default:
++            return True
++        if isinstance(default[0], str):
++            return all(isinstance(x, str) for x in value)
++        return len(value) == len(default) and all(_is_number(x) for x in value)
++    if isinstance(default, str):
++        return isinstance(value, str)
++    return True
++
++
++def _sanitize(value, default):
++    """把加载值与默认配置逐字段比对，非法值回退为默认值（默认值兜底）。"""
++    if isinstance(default, dict):
++        base = default if not isinstance(value, dict) else value
++        return {k: _sanitize(base.get(k, v), v) for k, v in default.items()}
++    if _value_ok(value, default):
++        return copy.deepcopy(value)
++    return copy.deepcopy(default)
++
++
+ class Config:
+     def __init__(self, path):
+         self.path = Path(path)
+         loaded = {}
+         if self.path.exists():
+             try:
+-                loaded = json.loads(self.path.read_text(encoding="utf-8"))
++                parsed = json.loads(self.path.read_text(encoding="utf-8"))
+             except (json.JSONDecodeError, OSError):
+-                loaded = {}
+-        self.data = _deep_merge(DEFAULT_CONFIG, loaded)
++                parsed = {}
++            if isinstance(parsed, dict):  # 顶层非对象（如数组/标量）整体按缺失处理
++                loaded = parsed
++        self.data = _sanitize(_deep_merge(DEFAULT_CONFIG, loaded), DEFAULT_CONFIG)
+ 
+     def get(self, key, default=None):
+         node = self.data
+         for part in key.split("."):
+             if not isinstance(node, dict) or part not in node:
+                 return default
+             node = node[part]
+         return node
+ 
+     def set(self, key, value):
+diff --git a/plugins/system_monitor/collector.py b/plugins/system_monitor/collector.py
+index 95d7a25..6b6226a 100644
+--- a/plugins/system_monitor/collector.py
++++ b/plugins/system_monitor/collector.py
+@@ -22,21 +22,25 @@ class CpuGpuCollector:
+             if self._nvml_handle is None:
+                 pynvml.nvmlInit()
+                 self._nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+             util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
+             return float(util.gpu), True
+         except Exception:
+             return 0.0, False
+ 
+     def _update(self):
+         cpu = self.read_cpu()
+-        gpu, gpu_ok = self.read_gpu()
++        try:
++            gpu, gpu_ok = self.read_gpu()
++        except Exception:
++            # read_gpu 自身已吞异常；此处兜底意外异常，避免采集线程死亡
++            gpu, gpu_ok = 0.0, False
+         with self._lock:
+             self._snapshot = {"cpu": cpu, "gpu": gpu, "gpu_ok": gpu_ok}
+ 
+     def _loop(self):
+         self.read_cpu()  # 预热：psutil 首次调用返回 0
+         while not self._stop.is_set():
+             time.sleep(self.interval_s)
+             self._update()
+ 
+     def start(self):
+diff --git a/tests/test_collector.py b/tests/test_collector.py
+index 065aa43..91d0880 100644
+--- a/tests/test_collector.py
++++ b/tests/test_collector.py
+@@ -41,10 +41,26 @@ def test_start_stop_lifecycle():
+     assert not c._thread.is_alive()
+ 
+ 
+ def test_read_gpu_returns_false_on_error(monkeypatch):
+     c = CpuGpuCollector()
+     import plugins.system_monitor.collector as collector_mod
+     monkeypatch.setattr(collector_mod.pynvml, "nvmlInit", lambda: (_ for _ in ()).throw(RuntimeError("no gpu")))
+     val, ok = c.read_gpu()
+     assert val == 0.0
+     assert ok is False
++
++
++def test_read_gpu_raising_does_not_kill_update(monkeypatch):
++    """验收第 8 条：read_gpu 抛异常时 _update 存活，快照标记 GPU 不可用。"""
++    c = CpuGpuCollector()
++    monkeypatch.setattr(c, "read_cpu", lambda: 42.0)
++
++    def boom():
++        raise RuntimeError("gpu read failed")
++
++    monkeypatch.setattr(c, "read_gpu", boom)
++    c._update()  # 不抛异常
++    snap = c.snapshot()
++    assert snap["cpu"] == 42.0
++    assert snap["gpu"] == 0.0
++    assert snap["gpu_ok"] is False
+diff --git a/tests/test_config.py b/tests/test_config.py
+index eda9fbd..2bafb2e 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -26,10 +26,48 @@ def test_set_and_save(tmp_path):
+     cfg.save()
+     data = json.loads(p.read_text(encoding="utf-8"))
+     assert data["window"]["scale"] == 1.5
+     assert data["window"]["pos"] == [200, 300]
+     assert data["refresh_interval_ms"] == 1000  # 默认字段回填
+ 
+ 
+ def test_defaults_constants_shape():
+     assert DEFAULT_CONFIG["window"]["scale"] == 1.0
+     assert DEFAULT_CONFIG["enabled_plugins"] == ["system_monitor"]
++
++
++def test_bad_typed_values_fall_back_to_defaults(tmp_path):
++    """验收第 7 条：改坏字段值（错误类型/非法取值）按默认值兜底。"""
++    p = tmp_path / "config.json"
++    p.write_text(json.dumps({
++        "window": {"scale": "abc", "pos": "oops"},
++        "refresh_interval_ms": -5,
++        "enabled_plugins": None,
++    }), encoding="utf-8")
++    cfg = Config(p)
++    assert cfg.get("window.scale") == 1.0
++    assert cfg.get("window.pos") == [100, 100]
++    assert cfg.get("refresh_interval_ms") == 1000
++    assert cfg.get("enabled_plugins") == ["system_monitor"]
++
++
++def test_valid_fields_survive_alongside_bad_ones(tmp_path):
++    """部分字段坏时，合法字段保留、坏字段兜底。"""
++    p = tmp_path / "config.json"
++    p.write_text(json.dumps({
++        "window": {"scale": "abc", "pos": [50, 60]},
++        "refresh_interval_ms": 500,
++    }), encoding="utf-8")
++    cfg = Config(p)
++    assert cfg.get("window.scale") == 1.0
++    assert cfg.get("window.pos") == [50, 60]
++    assert cfg.get("refresh_interval_ms") == 500
++
++
++def test_non_dict_config_falls_back_to_defaults(tmp_path):
++    """顶层非对象（数组/标量）整体按缺失处理，不崩溃。"""
++    p = tmp_path / "config.json"
++    p.write_text("[1, 2, 3]", encoding="utf-8")
++    cfg = Config(p)
++    assert cfg.get("window.scale") == 1.0
++    assert cfg.get("refresh_interval_ms") == 1000
++    assert cfg.get("enabled_plugins") == ["system_monitor"]
+diff --git a/tests/test_main.py b/tests/test_main.py
+index 9872187..5906159 100644
+--- a/tests/test_main.py
++++ b/tests/test_main.py
+@@ -82,10 +82,52 @@ def test_install_plugins_discovers_real_monitor(qapp, tmp_path):
+     cfg.set("refresh_interval_ms", 750)
+     w = PetWindow(pm, cfg)
+     mgr = main.install_plugins(w, cfg)
+     try:
+         assert len(mgr.instances) == 1
+         assert mgr.instances[0].id == "system_monitor"
+         assert mgr.instances[0].interval_ms == 750
+         assert w._hud.layout().count() >= 2  # paused 标签 + 数据块
+     finally:
+         mgr.stop_all()  # 收尾停采集线程，避免测试进程残留
++
++
++def test_build_window_with_bad_config_values_does_not_raise(qapp, tmp_path):
++    """验收第 7 条冒烟链：坏字段值构建 PetWindow 不抛异常，按默认值兜底。"""
++    import json
++    from PySide6.QtGui import QPixmap
++    from pet.config import Config
++    p = tmp_path / "config.json"
++    p.write_text(json.dumps({
++        "window": {"scale": "abc", "pos": "oops"},
++        "refresh_interval_ms": -5,
++        "enabled_plugins": None,
++    }), encoding="utf-8")
++    cfg = Config(p)
++    pm = QPixmap(100, 200)
++    pm.fill()
++    w = main.build_window(pm, cfg)
++    assert w.current_scale() == 1.0
++    assert w.current_pos() == [100, 100]
++
++
++def test_install_plugins_with_bad_config_values_does_not_raise(qapp, tmp_path):
++    """验收第 7 条冒烟链：坏字段值 install_plugins 不抛异常，interval 兜底为默认。"""
++    import json
++    from PySide6.QtGui import QPixmap
++    from pet.config import Config
++    p = tmp_path / "config.json"
++    p.write_text(json.dumps({
++        "window": {"scale": "abc", "pos": "oops"},
++        "refresh_interval_ms": -5,
++        "enabled_plugins": None,
++    }), encoding="utf-8")
++    cfg = Config(p)
++    pm = QPixmap(100, 100)
++    pm.fill()
++    w = main.build_window(pm, cfg)
++    mgr = main.install_plugins(w, cfg)
++    try:
++        assert mgr.instances[0].id == "system_monitor"
++        assert mgr.instances[0].interval_ms == 1000  # 兜底默认间隔
++    finally:
++        mgr.stop_all()
+diff --git a/tests/test_system_monitor_plugin.py b/tests/test_system_monitor_plugin.py
+index 686dec2..7ceb223 100644
+--- a/tests/test_system_monitor_plugin.py
++++ b/tests/test_system_monitor_plugin.py
+@@ -25,20 +25,30 @@ def test_refresh_updates_labels(qapp):
+     from PySide6.QtWidgets import QLabel
+     p = SystemMonitorPlugin()
+     w = p.panel(None)
+     labels = [w.layout().itemAt(i).widget() for i in range(2)]
+     p.collector._snapshot = {"cpu": 55.0, "gpu": 70.0, "gpu_ok": True}
+     p._refresh()
+     assert "55" in labels[0].text()
+     assert "70" in labels[1].text()
+ 
+ 
++def test_refresh_shows_gpu_unavailable_when_gpu_ok_false(qapp):
++    """验收第 8 条：GPU 不可用时标签显示「GPU 不可用」。"""
++    p = SystemMonitorPlugin()
++    w = p.panel(None)
++    labels = [w.layout().itemAt(i).widget() for i in range(2)]
++    p.collector._snapshot = {"cpu": 10.0, "gpu": 0.0, "gpu_ok": False}
++    p._refresh()
++    assert labels[1].text() == "GPU 不可用"
++
++
+ def test_pause_shows_paused_state(qapp):
+     from PySide6.QtCore import QTimer
+     p = SystemMonitorPlugin(interval_ms=500)
+     w = p.panel(None)
+     p._timer = QTimer()
+     p._timer.timeout.connect(p._refresh)
+     p._timer.start(p.interval_ms)
+     assert p._timer.isActive()
+     p.set_paused(True)
+     assert p._paused is True

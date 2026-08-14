@@ -1,0 +1,180 @@
+﻿=== git log ===
+
+=== git diff --stat ===
+ pet/plugin.py         | 25 +++++++++++++++
+ pet/plugins.py        | 41 ++++++++++++++++++++++++
+ tests/test_plugins.py | 87 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 153 insertions(+)
+
+=== git diff ===
+diff --git a/pet/plugin.py b/pet/plugin.py
+new file mode 100644
+index 0000000..a8e8edc
+--- /dev/null
++++ b/pet/plugin.py
+@@ -0,0 +1,25 @@
++from abc import ABC, abstractmethod
++
++
++class Plugin(ABC):
++    id: str = ""
++    name: str = ""
++
++    @abstractmethod
++    def start(self):
++        """启动后台采集等资源。"""
++
++    @abstractmethod
++    def stop(self):
++        """停止并回收资源。"""
++
++    @abstractmethod
++    def poll(self) -> dict:
++        """返回最新数据快照（线程安全读）。"""
++
++    @abstractmethod
++    def panel(self, parent):
++        """返回悬浮面板上的数据块控件。"""
++
++    def set_paused(self, paused: bool):
++        """默认空实现；需要响应暂停的插件自行覆盖。"""
+diff --git a/pet/plugins.py b/pet/plugins.py
+new file mode 100644
+index 0000000..f9aceb6
+--- /dev/null
++++ b/pet/plugins.py
+@@ -0,0 +1,41 @@
++import importlib.util
++from pathlib import Path
++
++from pet.plugin import Plugin
++
++
++class PluginManager:
++    def __init__(self, plugins_dir, enabled=None, factory=None):
++        self.plugins_dir = Path(plugins_dir)
++        self.enabled = list(enabled) if enabled is not None else None
++        self.factory = factory or (lambda plugin_class: plugin_class())
++        self.instances: list[Plugin] = []
++
++    def discover(self) -> list[Plugin]:
++        instances: list[Plugin] = []
++        for entry in sorted(self.plugins_dir.iterdir()):
++            mod_file = entry / "plugin.py"
++            if not entry.is_dir() or not mod_file.exists():
++                continue
++            spec = importlib.util.spec_from_file_location(f"plugin_{entry.name}", mod_file)
++            if spec is None or spec.loader is None:
++                continue
++            module = importlib.util.module_from_spec(spec)
++            spec.loader.exec_module(module)
++            plugin_class = getattr(module, "PluginClass", None)
++            if plugin_class is None or not issubclass(plugin_class, Plugin):
++                continue
++            inst = self.factory(plugin_class)
++            if self.enabled is not None and inst.id not in self.enabled:
++                continue
++            instances.append(inst)
++        self.instances = instances
++        return instances
++
++    def start_all(self):
++        for inst in self.instances:
++            inst.start()
++
++    def stop_all(self):
++        for inst in self.instances:
++            inst.stop()
+diff --git a/tests/test_plugins.py b/tests/test_plugins.py
+new file mode 100644
+index 0000000..0d90115
+--- /dev/null
++++ b/tests/test_plugins.py
+@@ -0,0 +1,87 @@
++import sys
++from pathlib import Path
++import pytest
++from pet.plugin import Plugin
++from pet.plugins import PluginManager
++
++FAKE_PLUGIN_SRC = '''
++from pet.plugin import Plugin
++
++class PluginClass(Plugin):
++    id = "fake_monitor"
++    name = "假插件"
++
++    def __init__(self):
++        self.started = False
++        self.stopped = False
++
++    def start(self):
++        self.started = True
++
++    def stop(self):
++        self.stopped = True
++
++    def poll(self):
++        return {"value": 1}
++
++    def panel(self, parent):
++        return None
++'''
++
++
++def _make_fake_plugin(tmp_path: Path, plugin_id: str) -> Path:
++    plugin_dir = tmp_path / plugin_id
++    plugin_dir.mkdir(parents=True)
++    (plugin_dir / "plugin.py").write_text(
++        FAKE_PLUGIN_SRC.replace("fake_monitor", plugin_id), encoding="utf-8"
++    )
++    return tmp_path
++
++
++def test_discover_loads_all(tmp_path):
++    d = _make_fake_plugin(tmp_path, "fake_one")
++    _make_fake_plugin(tmp_path, "fake_two")
++    mgr = PluginManager(d, enabled=None)
++    plugins = mgr.discover()
++    assert {p.id for p in plugins} == {"fake_one", "fake_two"}
++
++
++def test_enabled_filter(tmp_path):
++    d = _make_fake_plugin(tmp_path, "fake_one")
++    _make_fake_plugin(tmp_path, "fake_two")
++    mgr = PluginManager(d, enabled=["fake_two"])
++    plugins = mgr.discover()
++    assert [p.id for p in plugins] == ["fake_two"]
++
++
++def test_skips_non_plugin_module(tmp_path):
++    d = _make_fake_plugin(tmp_path, "fake_one")
++    bad = d / "bad_plugin"
++    bad.mkdir()
++    (bad / "plugin.py").write_text("x = 1\n", encoding="utf-8")
++    mgr = PluginManager(d, enabled=None)
++    assert [p.id for p in mgr.discover()] == ["fake_one"]
++
++
++def test_start_all_calls_each(tmp_path):
++    d = _make_fake_plugin(tmp_path, "fake_one")
++    mgr = PluginManager(d, enabled=None)
++    plugins = mgr.discover()
++    mgr.start_all()
++    assert all(p.started for p in plugins)
++    mgr.stop_all()
++    assert all(p.stopped for p in plugins)
++
++
++def test_factory_customizes_construction(tmp_path):
++    d = _make_fake_plugin(tmp_path, "fake_one")
++    calls = []
++
++    def factory(plugin_class):
++        calls.append(plugin_class)
++        return plugin_class()
++
++    mgr = PluginManager(d, enabled=None, factory=factory)
++    plugins = mgr.discover()
++    assert len(calls) == 1
++    assert plugins[0].id == "fake_one"

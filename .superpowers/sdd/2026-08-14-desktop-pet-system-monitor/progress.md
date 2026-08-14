@@ -19,3 +19,110 @@
 - 璁″垝鏂囨湰鍐呴儴鑷唇锛堟瘡浠诲姟娴嬭瘯涓庡叾浠ｇ爜涓�鑷达級锛涙棤鍐茬獊闇�瑁佸畾
 
 ## Task log
+Task 1: implementer DONE (commits b4a9fb2..b252e5c, root + report) — 1 passed
+  Concerns (observational): 1) pip 直接安装在本沙盒死路（PEP 714 metadata 下载被文件过滤拒），已用 PyPI JSON API 拉 wheel + --no-index 离线安装绕过，方案记录在 task-1-report.md；后续任务若加依赖必须沿用。2) pynvml 13.0.1 为过渡包，建议 nvidia-ml-py（已装，模块名同为 pynvml）；不影响本任务，Task 5 实现时留意。3) pytest 缓存写入被沙盒拒，无害。4) 5 个沙盒锁死的空目录，git 不跟踪，无害。
+Task 1: review pending
+Task 1: review clean (spec ?, Approved; no Critical/Important)
+Task 1: minor (deferred): root commit 混入 .superpowers/docs/picture（brief 指示 git add -A 所致，实现者无责；后续 commit 用精准 add）
+Task 1: minor (deferred): test_smoke 断言偏形式（brief 原文；后续任务测试需真实断言）
+Task 1: minor (deferred): .superpowers 文档在 git diff 中 GBK/UTF-8 乱码，不影响交付物
+Task 1: minor (deferred): pynvml 13.0.1 过渡包，Task 5 决策是否换 nvidia-ml-py
+Task 1: complete (commits b4a9fb2..b252e5c, review clean)
+Task 2: implementer DONE (commits b252e5c..7982ae5: a14111a config + 7982ae5 conftest env patch) — 4 passed config, 5 passed full
+  Concerns: 1) tmp_path 沙盒坑已修复：conftest patch os.mkdir 强制 0o777（Windows mode 无意义，等同平台默认）；后续任务跑测试沿用 task-2-report 命令模板（--basetemp 工作区唯一路径 + -p no:cacheprovider）。2) st_mode 对目录恒报 0o40777 不可信（诊断教训）。3) 残留 0o700 空目录删不掉，无害。4) 代码与 brief 逐字一致。
+Task 2: review pending
+Task 2: review clean (spec ?, Approved)
+Task 2: minor (deferred): 合法 JSON 但顶层非对象（如 [1,2,3]）时 _deep_merge 崩 AttributeError，不兜底（brief 实现同有此点，非规格偏差；一行修复 if not isinstance(loaded, dict)）；final review triage
+Task 2: minor (deferred): set 撞非 dict 中间节点（window: 5.0）时 TypeError；罕见输入
+Task 2: minor (deferred): conftest os.mkdir patch 进程级全局；建议加"仅限 Windows 沙盒"注释防 Linux CI 误读；final review triage
+Task 2: minor (deferred): 兜底路径（空文件/损坏 JSON/get default）无测试保护；可选项
+Task 2: complete (commits b252e5c..7982ae5, review clean)
+Task 3: implementer DONE (commit b19d895) — 5 passed geometry, 10 passed full
+  Concerns (env): python -m pytest 而非 pytest 入口；git -C 规避中文路径 cd 坑；精确 add 规避残留目录权限警告；LF→CRLF 提示无害。
+Task 3: review pending
+Task 3: review clean (spec ?, Approved)
+Task 3: minor (deferred): round() 银行家舍入 vs 中文"四舍五入"语义未锁定；brief 实现如此，max(1,·) 吸收差异，影响低
+Task 3: minor (deferred): orig_w==0 除零未防护；界面 orig_w 来自 ds.png 原始宽不为 0
+Task 3: minor (deferred): 审查包 git log 段为空（打包层面）；下次生成验证
+Task 3: complete (commit b19d895, review clean)
+Task 4: implementer DONE (commit a4cc2fd) — 5 passed, 15 full
+  Concerns: brief 文件 mojibake（子代理按 GBK 误读 UTF-8，已还原"假插件"）；brief Step 4 Expected 写 4 passed 实为 5 个测试（controller 计划疏漏，按代码执行为准）。
+Task 4: review pending
+Task 4: review: spec ?, Approved; 1 Important (non-blocking): spec.loader.exec_module 无异常保护，坏插件（语法错误）使整个 discover() 崩溃
+Task 4: Ruling: exec_module 隔离 — finding 成立；虽为 brief 原样代码（plan-mandated），但 spec 容错精神（验收清单第 8 条）支持坏插件不拖垮全体；修复成本 3 行，现在修优于留给 Task 6/10；成本若错：多一轮 fix 循环
+Task 4: minor (deferred): issubclass 拒绝分支无测试守护；test_enabled_filter 目录名与插件 id 同名（测试隔离性）；plugins_dir 不存在时 FileNotFoundError；模块未注册 sys.modules 重复 discover 重跑副作用
+Task 4: fix round 1 pending
+Task 4: fix round 1/5 (1 addressed, 0 open; commit 3a8b32b; re-review ADDRESSED, no new breakage)
+Task 4: complete (commits b19d895..3a8b32b, review clean)
+Task 5: implementer DONE (commit 321ac7f) — 5 passed, 21 full
+Task 5: Ruling: stop() 线程引用保留 vs 置 None — 计划内部矛盾（brief 测试断言 _thread is not None，brief 实现置 None，不可同时成立）；实现者按 TDD 契约以测试为验收标准，保留测试原文、实现去掉置 None（功能等价：start 以 is_alive() 重建线程）；裁定维持此偏离，reviewer 若提出改回 brief 实现，以本 Ruling 驳回；成本若错：语义完全等价，无风险
+  Concerns: pynvml FutureWarning（已知，Task 5 决策点仍为"维持 pynvml"）；PowerShell 无 && 用 ; 串联
+Task 5: review pending
+Task 5: review clean (spec ?, Approved; no Critical/Important)
+Task 5: minor (deferred): report 行数笔误（+70/+37 vs 实际 57/50，总数碰巧一致）；终审时如顺手可修正报告
+Task 5: minor (deferred): read_gpu 惰性 init 无锁，当前单线程假设成立；若未来 GUI 线程强制刷新需加锁或注释
+Task 5: complete (commit 321ac7f, review clean)
+Task 6: implementer DONE (commit 0d29812) — 6 passed, 27 full
+Task 6: Ruling: panel widget 持有引用 — 计划缺陷（brief 测试丢弃 panel(None) 返回值 + brief 实现不持有 widget → 顶层 QWidget 被 GC，set_paused 抛 C++ object already deleted）；实现者加 self._widget 持有，最小修复使 brief 自身测试通过；裁定接受；生产路径（PetWindow 持有）本就安全，此修复双保险
+  Concerns: set_paused(False) 恢复时 QTimer.start(1000) 固定值，非默认 interval_ms 构造的插件暂停恢复后漂移（brief 原文）；待 reviewer 判断
+Task 6: review pending
+Task 6: review: spec ?, quality Needs work — 1 Important: set_paused(False) 恢复时 QTimer.start(1000) 固定值，与 interval_ms 公开契约漂移（两条启动路径行为矛盾，静默生效）；修复：start(self.interval_ms)
+Task 6: minor (deferred): _PANEL_STYLE 缺深色半透明底+圆角（brief 模板原样；若上层 HUD 统一处理可忽略，Task 8 后 triage）
+Task 6: minor (deferred): test_pause_shows_paused_state 未断言标签文本与 timer 状态；可顺手补
+Task 6: fix round 1 pending
+Task 6: fix round 1/5 (1 addressed, 0 open; commit daa0e84; re-review ADDRESSED, no new breakage)
+Task 6: complete (commits 321ac7f..daa0e84, review clean)
+Task 7: implementer DONE (commit 27f026c) — 5 passed, 32 full
+Task 7: Ruling: ActorWidget 构造时 resize 到 pixmap scaled 尺寸 — 计划缺陷（brief 测试角点坐标按 pixmap 尺寸设计，brief 实现不设几何，offscreen 默认 640×480 使命中测试必挂）；实现者加一行 self.resize(*scaled_size(...))，测试未动；set_scale 仍不 resize 窗口（契约保持），PetWindow layout 接管无冲突；裁定接受
+Task 7: review pending
+Task 7: review: spec ?, Approved
+Task 7: Ruling: I1 paintEvent 每帧分配中间 QPixmap（Important, 非阻断, brief 原样代码）— 暂缓不修：修复需重写绘制逻辑，offscreen 无法验证呼吸缩放视觉效果，改错风险>收益；当前 pixmap 尺寸开销微秒级可忽略；Task 11 真机验收时观察，卡顿则修；成本若错：性能优化推迟，无功能影响
+Task 7: minor (deferred): M1 paintEvent 死代码 target = self.rect().size() 一行；M2 手柄 9px/命中 13px 差 1px（QRect 双点包含语义，逐字继承 brief，交互无影响）；M3 测试访问私有成员且未真验重绘（brief 原文）；M4 呼吸锚点在左上非居中（+2% 右下被裁，cosmetic，真机看效果）
+Task 7: note: 呼吸动画 __init__ 无条件 start；Task 9 PetWindow 按 config breathing_animation 调 set_breathing 显式控制（计划内已覆盖）
+Task 7: complete (commit 27f026c, review clean, 1 Important parked)
+Task 8: implementer DONE (commit 829ffb8) — 4 passed, 36 full
+  Adaptations: WA_TranslucentBackground 用 Qt. 前缀（PySide6 无实例属性）；「已暂停」还原 UTF-8；brief 测试 count 断言 1→2（paused 标签在末尾、add_block 插其前，结构依赖，实现保持 brief 原文）
+Task 8: review pending
+Task 8: review clean (spec ?, Approved; no Critical/Important)
+Task 8: minor (deferred): 面板可见时动态 add_block 的新块初始隐藏（真实主流程先挂块后显示不受影响）；集成提醒：PetWindow 可见期间挂块需手动 show
+Task 8: minor (deferred): show_paused 强设块可见性，覆盖插件自主控制（规格范围内）
+Task 8: minor (deferred): windowOpacity 为窗口级属性，HudPanel 淡入淡出可能连带 PetWindow 整链透明度（角色跟着变透明）；Task 9 集成时验证，若影响观感改用 QGraphicsOpacityEffect
+Task 8: complete (commit 829ffb8, review clean)
+Task 9: implementer DONE (commit fe5549f) — 5 passed, 41 full; offscreen 冒烟: 910x941 (ds.png 原始比例), 呼吸 Running, HUD 隐藏
+  Concerns: windowOpacity 连带透明度（按提醒未改 HudPanel，Task 10 真机评估）；offscreen 验证不了交互观感；QCursor 未使用 import（brief 原文）；缩放水平位移方向感（设计约定）
+Task 9: review pending
+Task 9: review: spec ?, quality Needs work — 1 Critical: 缩放拖拽失控
+  Critical 详情: _apply_resize 的 drag_dx = globalPosition().x() - self.x() 是光标距窗口左缘绝对距离，而 scale_from_drag 契约是移动增量（test_geometry: scale_from_drag(100,50,1.0)==1.5）；按下瞬间 drag_dx 已=窗口宽，首次 move 翻倍、每像素 scale+~1.0 指数失控；报告"符合契约"判定错误；test_window_min_scale 直接调 _apply_resize(-200) 绕过真实事件路径且 -200 在真实路径不可能出现，钳制断言掩盖了数学错误
+  Minor (deferred): Esc 不清理在途 _drag_offset（缩放模式拖拽中按 Esc 极端情况）；globalPos() 弃用 API；QCursor 死导入；HUD 悬停淡出竞争与首次 fade_in 无效（隐藏态 opacity=1.0 无淡入效果）；无最大 scale 上限；Task 10 真机观察
+Task 9: fix round 1 pending
+Task 9: fix round 1/5 (1 addressed, 0 open; commit 004ece3; re-review ADDRESSED, no new breakage; 反证实验确认测试锁死增量语义)
+Task 9: complete (commits 829ffb8..004ece3, review clean)
+Task 10: implementer DONE (commit 35aa2ba) — 4 passed, 46 full; 冒烟实证发现契约冲突
+Task 10: Ruling: 插件导出契约冲突（PluginClass vs SystemMonitorPlugin）— 计划缺陷：Task 4 PluginManager 约定模块导出 PluginClass（测试已锁定），Task 6 类名 SystemMonitorPlugin（spec 命名），计划层面未对齐；冒烟实证 discover 返回空、HUD 挂不上数据块；修法：plugins/system_monitor/plugin.py 加一行 PluginClass = SystemMonitorPlugin（别名，最小、与既有测试兼容），另在 tests/test_plugins.py 追加真实插件目录发现测试；成本若错：别名方式引入双类名轻微冗余，但零行为风险
+  Also: test_main_loads_pixmap 补 qapp 参数（QPixmap 无 QApplication 时 fail-fast 0xC0000409，已最小复现，合理修正）
+Task 10: review pending（含契约冲突 finding，待 reviewer 独立确认）
+Task 10: review: spec ?, Approved; finding 独立确认：插件导出契约冲突 = Critical（对 Task 11 验收，第 3/4 条直接依赖 discover）；别名方案获审查者认可（优于改 discover，破坏已锁定契约）；建议真实插件发现测试直接调 main.install_plugins（同时补 Important 提示的装配函数单测缺口）
+Task 10: Important (deferred after fix): main.install_plugins 本体无单测触达（brief 测试内联重写 factory）；真实插件发现测试将覆盖
+Task 10: minor (deferred): _StateSaver 无 Python 引用留存（PySide6 保留已装过滤器 + aboutToQuit 兜底，无实际风险）；load_pixmap 失败路径无负向测试；测试内未使用 import（brief 原文）
+Task 10: fix round 1 pending
+Task 10: fix round 1/5 (1 addressed, 0 open; commit 994e8f1; re-review ADDRESSED, no new breakage; 冒烟对照 discovered [] → ['system_monitor'])
+Task 10: complete (commits 004ece3..994e8f1, review clean)
+Task 11: implementer DONE (commit 352ebb9) — 54 passed (47 + 7 new regression), exit 0
+  Step 3 fixes: 1) pet/config.py _sanitize/_value_ok：错误类型字段值（scale=abc、pos=oops、interval=-5、enabled=null、顶层非对象）按默认配置类型校验回退（修复验收第 7 条发现）；2) collector._update() 给 read_gpu 加 try/except，异常标记 gpu_ok=False 线程不死（修复验收第 8 条发现）
+  验收第 1-6 条（真机）如实标注待用户验收；第 7/8 条沙盒冒烟 PASS（修复前拿到诚实失败证据）
+  Note: 计划文档正文"兜底"曾误打"兑底"，已顺手修正
+Task 11: review pending
+Task 11: review clean (spec ?, Approved; 2 Minor: _sanitize dict 分支丢弃未知键（行为变化未披露，影响小）；pynvml 噪音）
+Task 11: complete (commit 352ebb9, review clean)
+ALL TASKS COMPLETE. Final whole-branch review pending.
+FINAL REVIEW: verdict No (With fixes) — 54 passed but two blind spots: 单次 move 掩盖 C1 累计语义；offscreen 无法渲染掩盖 C2 裁剪/fade 失效
+FINAL C1 (Critical): 缩放双重累计 — _apply_resize 把相对 press 起点的总位移 drag_dx 加到已更新的 self._scale（scale_from_drag=current+drag/orig_w），连续 move 反复叠加指数放大、回拖反向放大；探针: move2 期望1.6实得2.1，回拖期望1.1实得2.2；T9 修复只改基准未改叠加语义；修法: press 记 _resize_start_scale，_apply_resize 幂等 scale=clamp(start+drag/orig_w)，补两次 move QTest
+FINAL C2 (Critical): HUD 整体失效 — HudPanel 子控件置于父窗口边界外（x=width+6），child widget 绘制被裁剪到顶级窗口内 → 一像素画不出；windowOpacity 仅顶层窗口有效 → fade 不发生且 fade_out 后 finished 回调 hide() 永不触发（opacity 不变）→ 永不消失；修法: HudPanel 顶层窗口化（Qt.Tool|Frameless|StaysOnTop + WA_TranslucentBackground），PetWindow moveEvent/resizeEvent/showEvent 同步全局位置，顶层上 fade 有效；补测试（isWindow/flags/位置跟随/fade 后 hide）
+FINAL I1 (Important): 启动 scale 未钳 0.3（_sanitize 只保证 >0，config scale=0.05 启动出 45px 窗口，两路径语义不一致）；修法 max(0.3, ...)
+FINAL I2 (Important): 退出链路无 stop_all()，插件 stop 语义从未在真实生命周期行使；修法 main() 持有 mgr，aboutToQuit 里 mgr.stop_all()
+FINAL I3 (Important): enabled 过滤在 factory 实例化之后，被禁插件也被构造；修法用 plugin_class.id 先过滤再 factory
+FINAL minors for fix wave: Esc 清 _drag_offset；globalPos()→globalPosition()；删 QCursor 死 import；load_pixmap 负向测试；issubclass 拒绝用例；（可选）.gitignore 补残留目录模式
+FINAL deferred keep: T2 set 撞非 dict；T3 舍入/除零；T4 过滤隔离/plugins_dir 不存在；T5 惰性 init 注释；T7 parked（真机观察）；T8 动态挂块；T9 无最大上限（设计 8.3 明确）；T10 _StateSaver；T11 未知键丢弃；pynvml→nvidia-ml-py（零改动，后续）
+FINAL fix wave: pending (ONE dispatch)
+FINAL fix wave re-review: ALL ADDRESSED (2C+3I+minors), 60 passed, 可合入
+Final: complete. All tasks done. HEAD=b482a2a

@@ -1,0 +1,73 @@
+﻿=== git log ===
+
+=== git diff --stat ===
+ plugins/system_monitor/plugin.py    |  2 +-
+ tests/test_system_monitor_plugin.py | 14 ++++++++++++--
+ 2 files changed, 13 insertions(+), 3 deletions(-)
+
+=== git diff ===
+diff --git a/plugins/system_monitor/plugin.py b/plugins/system_monitor/plugin.py
+index 6021ed9..7b9b875 100644
+--- a/plugins/system_monitor/plugin.py
++++ b/plugins/system_monitor/plugin.py
+@@ -52,21 +52,21 @@ class SystemMonitorPlugin(Plugin):
+ 
+     def set_paused(self, paused: bool):
+         self._paused = paused
+         if paused:
+             if self._timer is not None:
+                 self._timer.stop()
+             for label in self._labels:
+                 label.setText("已暂停")
+         else:
+             if self._timer is not None:
+-                self._timer.start(1000)
++                self._timer.start(self.interval_ms)
+             self._refresh()
+ 
+     def _refresh(self):
+         if not self._labels:
+             return
+         snap = self.poll()
+         cpu_text = f"CPU {snap['cpu']:.0f}%"
+         gpu_text = "GPU 不可用" if not snap["gpu_ok"] else f"GPU {snap['gpu']:.0f}%"
+         self._labels[0].setText(cpu_text)
+         self._labels[1].setText(gpu_text)
+diff --git a/tests/test_system_monitor_plugin.py b/tests/test_system_monitor_plugin.py
+index 25c08ae..686dec2 100644
+--- a/tests/test_system_monitor_plugin.py
++++ b/tests/test_system_monitor_plugin.py
+@@ -26,21 +26,31 @@ def test_refresh_updates_labels(qapp):
+     p = SystemMonitorPlugin()
+     w = p.panel(None)
+     labels = [w.layout().itemAt(i).widget() for i in range(2)]
+     p.collector._snapshot = {"cpu": 55.0, "gpu": 70.0, "gpu_ok": True}
+     p._refresh()
+     assert "55" in labels[0].text()
+     assert "70" in labels[1].text()
+ 
+ 
+ def test_pause_shows_paused_state(qapp):
+-    p = SystemMonitorPlugin()
+-    p.panel(None)
++    from PySide6.QtCore import QTimer
++    p = SystemMonitorPlugin(interval_ms=500)
++    w = p.panel(None)
++    p._timer = QTimer()
++    p._timer.timeout.connect(p._refresh)
++    p._timer.start(p.interval_ms)
++    assert p._timer.isActive()
+     p.set_paused(True)
+     assert p._paused is True
++    assert p._timer.isActive() is False
++    labels = [w.layout().itemAt(i).widget() for i in range(2)]
++    assert labels[0].text() == "已暂停"
++    assert labels[1].text() == "已暂停"
+     p.set_paused(False)
+     assert p._paused is False
++    assert p._timer.isActive() is True
+ 
+ 
+ def test_interval_ms_from_constructor():
+     p = SystemMonitorPlugin(interval_ms=500)
+     assert p.interval_ms == 500

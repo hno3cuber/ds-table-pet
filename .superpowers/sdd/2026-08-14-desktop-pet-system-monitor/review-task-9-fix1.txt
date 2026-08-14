@@ -1,0 +1,119 @@
+﻿=== git log ===
+
+=== git diff --stat ===
+ pet/window.py        |  8 ++++++--
+ tests/test_window.py | 25 +++++++++++++++++++++++++
+ 2 files changed, 31 insertions(+), 2 deletions(-)
+
+=== git diff ===
+diff --git a/pet/window.py b/pet/window.py
+index 1f4b425..686a2a8 100644
+--- a/pet/window.py
++++ b/pet/window.py
+@@ -10,20 +10,21 @@ from pet.hud import HudPanel
+ class PetWindow(QWidget):
+     def __init__(self, pixmap: QPixmap, config):
+         super().__init__()
+         self._pixmap = pixmap
+         self._config = config
+         self._scale = float(config.get("window.scale", 1.0))
+         self._paused = False
+         self._resize_mode = False
+         self._drag_offset = None
+         self._resize_corner = None
++        self._resize_origin_global_x = 0
+         self._plugins = []
+ 
+         self.setWindowFlags(
+             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+         )
+         self.setAttribute(Qt.WA_TranslucentBackground, True)
+         self.setAttribute(Qt.WA_DeleteOnClose, False)
+ 
+         layout = QVBoxLayout(self)
+         layout.setContentsMargins(0, 0, 0, 0)
+@@ -89,29 +90,32 @@ class PetWindow(QWidget):
+     def mousePressEvent(self, event):
+         if event.button() == Qt.RightButton:
+             self._show_menu(event.globalPos())
+             return
+         if event.button() != Qt.LeftButton:
+             return
+         local = event.position().toPoint()
+         if self._resize_mode:
+             corner = self._actor.handle_at(local)
+             if corner is not None:
+-                self._resize_corner = corner
++                self._begin_resize(corner)
++                # 记录按下瞬间光标全局 X，作为本次缩放拖拽的增量基准
++                self._resize_origin_global_x = event.globalPosition().toPoint().x()
+                 self._drag_offset = None
+                 return
+         self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+         self._resize_corner = None
+ 
+     def mouseMoveEvent(self, event):
+         if self._resize_corner is not None:
+-            self._apply_resize(event.globalPosition().toPoint().x() - self.x())
++            drag_dx = event.globalPosition().toPoint().x() - self._resize_origin_global_x
++            self._apply_resize(drag_dx)
+             return
+         if self._drag_offset is not None:
+             self.move(event.globalPosition().toPoint() - self._drag_offset)
+ 
+     def mouseReleaseEvent(self, event):
+         if event.button() != Qt.LeftButton:
+             return
+         if self._resize_corner is not None:
+             self._finish_resize()
+         self._drag_offset = None
+diff --git a/tests/test_window.py b/tests/test_window.py
+index 9f00e99..8f031bd 100644
+--- a/tests/test_window.py
++++ b/tests/test_window.py
+@@ -18,20 +18,45 @@ def test_window_min_scale_after_resize_drag(qapp, tmp_path):
+     pm = QPixmap(100, 100)
+     pm.fill()
+     cfg = Config(tmp_path / "config.json")
+     w = PetWindow(pm, cfg)
+     w._enter_resize_mode()
+     w._begin_resize(3)  # 按下右下角手柄
+     w._apply_resize(-200)  # 向左拖 200px（相对原图 100，触发最小钳制）
+     assert w.current_scale() >= 0.3
+ 
+ 
++def test_resize_drag_incremental_scale(qapp, tmp_path):
++    """真实事件流：右下角手柄按下后右移 50px，scale 应为 1.5（增量语义）。
++
++    使用 QTest 合成 press/move/release，验证 mouseMoveEvent 里 drag_dx 是相对
++    press 瞬间的增量，而不是光标距窗口左缘的绝对距离。
++    """
++    import pytest
++    from PySide6.QtCore import QPoint, Qt
++    from PySide6.QtTest import QTest
++
++    pm = QPixmap(100, 100)
++    pm.fill()
++    cfg = Config(tmp_path / "config.json")
++    w = PetWindow(pm, cfg)
++    w.show()
++    w._enter_resize_mode()
++    # 右下角手柄命中区（局部坐标，窗口 100x100）
++    QTest.mousePress(w, Qt.LeftButton, pos=QPoint(95, 95))
++    # 右移 50px：增量 50，scale = 1.0 + 50/100 = 1.5，窗口宽 150
++    QTest.mouseMove(w, QPoint(145, 95))
++    assert w.current_scale() == pytest.approx(1.5, abs=0.1)
++    assert w.width() == pytest.approx(150, abs=1)
++    QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(145, 95))
++
++
+ def test_breathing_follows_config(qapp, tmp_path):
+     pm = QPixmap(100, 100)
+     pm.fill()
+     cfg = Config(tmp_path / "config.json")
+     cfg.set("breathing_animation", False)
+     w = PetWindow(pm, cfg)
+     assert w._actor._breath_anim.state() != w._actor._breath_anim.State.Running
+ 
+ 
+ def test_install_plugin_adds_block(qapp, tmp_path):
