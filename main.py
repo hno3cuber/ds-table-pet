@@ -49,12 +49,13 @@ def main():
     config = Config(CONFIG_PATH)
     pixmap = load_pixmap(PIXMAP_PATH)
     window = build_window(pixmap, config)
-    install_plugins(window, config)
+    mgr = install_plugins(window, config)
     window.show()
     window.installEventFilter(_StateSaver(window, config))
 
     def on_close():
         save_state(window, config)
+        mgr.stop_all()
 
     app.aboutToQuit.connect(on_close)
     sys.exit(app.exec())

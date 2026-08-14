@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+
+# 沙盒残留目录（防 git add -A 误入）
+.pytest-tmp-*/
+.pip-tmp/
+.pytest_tmp/
+tmp_*/

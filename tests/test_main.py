@@ -9,6 +9,13 @@ def test_main_loads_pixmap(qapp, tmp_path):
     assert not pm.isNull()
 
 
+def test_load_pixmap_missing_raises(qapp, tmp_path):
+    import pytest
+
+    with pytest.raises(FileNotFoundError):
+        main.load_pixmap(str(tmp_path / "不存在.png"))
+
+
 def test_build_window_from_config(qapp, tmp_path):
     cfg = Config(tmp_path / "config.json")
     pm = QPixmap(100, 200)

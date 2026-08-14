@@ -27,11 +27,12 @@ class PluginManager:
                 plugin_class = getattr(module, "PluginClass", None)
                 if plugin_class is None or not issubclass(plugin_class, Plugin):
                     continue
+                # 用类属性 id 过滤（factory 实例化之前），避免实例化被禁用插件
+                if self.enabled is not None and getattr(plugin_class, "id", "") not in self.enabled:
+                    continue
                 inst = self.factory(plugin_class)
             except Exception as e:
                 print(f"[plugin] skip broken plugin: {entry.name}: {e}", file=sys.stderr)
-                continue
-            if self.enabled is not None and inst.id not in self.enabled:
                 continue
             instances.append(inst)
         self.instances = instances

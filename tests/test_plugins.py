@@ -63,6 +63,16 @@ def test_skips_non_plugin_module(tmp_path):
     assert [p.id for p in mgr.discover()] == ["fake_one"]
 
 
+def test_skips_plugin_class_not_subclass(tmp_path):
+    """PluginClass 存在但不是 Plugin 子类（如普通 class PluginClass: pass）被跳过。"""
+    d = _make_fake_plugin(tmp_path, "fake_one")
+    bad = d / "bad_plugin"
+    bad.mkdir()
+    (bad / "plugin.py").write_text("class PluginClass:\n    pass\n", encoding="utf-8")
+    mgr = PluginManager(d, enabled=None)
+    assert [p.id for p in mgr.discover()] == ["fake_one"]
+
+
 def test_start_all_calls_each(tmp_path):
     d = _make_fake_plugin(tmp_path, "fake_one")
     mgr = PluginManager(d, enabled=None)

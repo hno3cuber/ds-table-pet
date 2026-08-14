@@ -12,6 +12,9 @@ class HudPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("HudPanel")
+        # 独立顶层窗口：child widget 绘制会被裁剪到父窗口矩形内，无法画到窗外；
+        # 且 windowOpacity 只对顶层窗口有效。因此 HUD 必须自持窗口。
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setStyleSheet(_PANEL_STYLE)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         layout = QVBoxLayout(self)

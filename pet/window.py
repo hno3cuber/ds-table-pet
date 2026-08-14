@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QCursor, QPixmap
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QMenu, QVBoxLayout, QWidget
 
 from pet.actor import ActorWidget
@@ -12,12 +12,13 @@ class PetWindow(QWidget):
         super().__init__()
         self._pixmap = pixmap
         self._config = config
-        self._scale = float(config.get("window.scale", 1.0))
+        self._scale = max(0.3, float(config.get("window.scale", 1.0)))
         self._paused = False
         self._resize_mode = False
         self._drag_offset = None
         self._resize_corner = None
         self._resize_origin_global_x = 0
+        self._resize_start_scale = 0.0
         self._plugins = []
 
         self.setWindowFlags(
@@ -32,7 +33,7 @@ class PetWindow(QWidget):
         self._actor.set_breathing(bool(config.get("breathing_animation", True)))
         layout.addWidget(self._actor)
 
-        self._hud = HudPanel(self)
+        self._hud = HudPanel()
         self._hud.set_scale(self._scale)
 
         w, h = scaled_size(pixmap.width(), pixmap.height(), self._scale)
@@ -69,7 +70,8 @@ class PetWindow(QWidget):
         self._resize_corner = corner
 
     def _apply_resize(self, drag_dx: int):
-        self._scale = scale_from_drag(self._pixmap.width(), drag_dx, self._scale)
+        # 以 press 瞬间的 scale 为基准：drag_dx 是相对起点的总位移，绝对语义幂等
+        self._scale = scale_from_drag(self._pixmap.width(), drag_dx, self._resize_start_scale)
         self._actor.set_scale(self._scale)
         w, h = scaled_size(self._pixmap.width(), self._pixmap.height(), self._scale)
         self.resize(w, h)
@@ -77,19 +79,22 @@ class PetWindow(QWidget):
 
     def _finish_resize(self):
         self._resize_corner = None
+        self._resize_start_scale = 0.0
         self._config.set("window.scale", self._scale)
         self._config.save()
 
     def _exit_resize_mode(self):
         self._resize_mode = False
         self._resize_corner = None
+        self._resize_start_scale = 0.0
+        self._drag_offset = None
         self._actor.set_resize_mode(False)
         self.unsetCursor()
 
     # ---- 鼠标事件 ----
     def mousePressEvent(self, event):
         if event.button() == Qt.RightButton:
-            self._show_menu(event.globalPos())
+            self._show_menu(event.globalPosition().toPoint())
             return
         if event.button() != Qt.LeftButton:
             return
@@ -98,8 +103,9 @@ class PetWindow(QWidget):
             corner = self._actor.handle_at(local)
             if corner is not None:
                 self._begin_resize(corner)
-                # 记录按下瞬间光标全局 X，作为本次缩放拖拽的增量基准
+                # 记录按下瞬间光标全局 X 与起始 scale，作为本次缩放拖拽的基准
                 self._resize_origin_global_x = event.globalPosition().toPoint().x()
+                self._resize_start_scale = self._scale
                 self._drag_offset = None
                 return
         self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -137,13 +143,20 @@ class PetWindow(QWidget):
 
     def _position_hud(self):
         self._hud.adjustSize()
-        x = self.width() + 6
-        y = 0
-        self._hud.move(x, y)
+        # HUD 是独立顶层窗口，用全局坐标同步到主窗口右缘外侧
+        self._hud.move(self.mapToGlobal(QPoint(self.width() + 6, 0)))
 
     def resizeEvent(self, event):
         self._position_hud()
         super().resizeEvent(event)
+
+    def moveEvent(self, event):
+        self._position_hud()
+        super().moveEvent(event)
+
+    def showEvent(self, event):
+        self._position_hud()
+        super().showEvent(event)
 
     # ---- 菜单 ----
     def _show_menu(self, global_pos: QPoint):
