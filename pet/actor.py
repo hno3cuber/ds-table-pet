@@ -43,6 +43,11 @@ class ActorWidget(QWidget):
         self._scale = scale
         self.update()
 
+    def set_pixmap(self, pixmap: QPixmap):
+        """切换角色图（保持当前窗口尺寸，按 rect 拉伸绘制）。"""
+        self._pixmap = pixmap
+        self.update()
+
     def set_breathing(self, enabled: bool):
         if enabled:
             self._breath_anim.start()

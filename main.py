@@ -11,6 +11,12 @@ from pet.window import PetWindow
 
 CONFIG_PATH = "config.json"
 PIXMAP_PATH = "picture/ds.png"
+# 姿势图集：normal 为默认形象，up/down 为拖拽方向形象
+PIXMAP_PATHS = {
+    "normal": "picture/ds.png",
+    "up": "picture/up.png",
+    "down": "picture/down.png",
+}
 
 
 def load_pixmap(path: str) -> QPixmap:
@@ -20,8 +26,18 @@ def load_pixmap(path: str) -> QPixmap:
     return pm
 
 
-def build_window(pixmap: QPixmap, config: Config) -> PetWindow:
-    return PetWindow(pixmap, config)
+def load_poses() -> dict:
+    """加载全部姿势图；up/down 缺失时回退到 normal，normal 缺失则报错。"""
+    normal = load_pixmap(PIXMAP_PATHS["normal"])
+    poses = {"normal": normal}
+    for name in ("up", "down"):
+        pm = QPixmap(PIXMAP_PATHS[name])
+        poses[name] = pm if not pm.isNull() else normal
+    return poses
+
+
+def build_window(pixmap: QPixmap, config: Config, poses=None) -> PetWindow:
+    return PetWindow(pixmap, config, poses=poses)
 
 
 def install_plugins(window: PetWindow, config: Config):
@@ -61,8 +77,8 @@ def install_sigint_quit(app: QApplication):
 def main():
     app = QApplication(sys.argv)
     config = Config(CONFIG_PATH)
-    pixmap = load_pixmap(PIXMAP_PATH)
-    window = build_window(pixmap, config)
+    poses = load_poses()
+    window = build_window(poses["normal"], config, poses=poses)
     mgr = install_plugins(window, config)
     window.show()
     window.installEventFilter(_StateSaver(window, config))

@@ -137,6 +137,44 @@ def test_install_plugin_adds_block(qapp, tmp_path):
     assert w._hud.layout().count() >= 1
 
 
+def test_pose_threshold_logic(qapp, tmp_path):
+    """姿势判定单元：上拖过阈值 up、下拖过阈值 down、阈值内 normal。"""
+    from PySide6.QtCore import QPoint
+
+    normal = QPixmap(100, 100); normal.fill()
+    up = QPixmap(100, 100); up.fill()
+    down = QPixmap(100, 100); down.fill()
+    w = PetWindow(normal, Config(tmp_path / "config.json"),
+                  poses={"normal": normal, "up": up, "down": down})
+    w._drag_start_global = QPoint(100, 100)
+    w._update_pose(QPoint(100, 80))   # dy=-20 → up
+    assert w._pose == "up"
+    w._update_pose(QPoint(100, 150))  # dy=+50 → down
+    assert w._pose == "down"
+    w._update_pose(QPoint(100, 105))  # dy=+5（阈值内）→ normal
+    assert w._pose == "normal"
+
+
+def test_drag_up_then_release_restores_pose(qapp, tmp_path):
+    """集成：按住向上拖 → up；松开 → 恢复 normal。"""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    normal = QPixmap(100, 100); normal.fill(Qt.gray)
+    up = QPixmap(100, 100); up.fill(Qt.red)
+    down = QPixmap(100, 100); down.fill(Qt.blue)
+    w = PetWindow(normal, Config(tmp_path / "config.json"),
+                  poses={"normal": normal, "up": up, "down": down})
+    w.show()
+    QTest.mousePress(w, Qt.LeftButton, pos=QPoint(50, 50))
+    assert w._pose == "normal"
+    QTest.mouseMove(w, QPoint(50, 30))  # 全局上移 → up
+    assert w._pose == "up"
+    QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(50, 30))
+    assert w._pose == "normal"
+    assert w._actor._pixmap is normal
+
+
 def test_toggle_pause(qapp, tmp_path):
     pm = QPixmap(100, 100)
     pm.fill()
