@@ -106,3 +106,35 @@ def test_ring_follows_pet_window_move(qapp, tmp_path):
     pet_after = w.pos() + QPoint(50, 50)
     # 圆环中心相对本体中心的偏移不变
     assert (after_center - pet_after) == (before_center - pet_before)
+
+
+def test_click_outside_ring_hides_it(qapp, tmp_path):
+    """圆环展开时点击窗口外空白 → 收起（全局点击监听）。"""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    ring = _ring(tmp_path, qapp)
+    ring.layout_for(QPoint(300, 300), pet_radius=50)
+    ring.show()
+    rect = ring.geometry()
+    outside = QPointF(rect.x() - 50, rect.y() - 50)  # 窗口外左上角
+    ev = QMouseEvent(QEvent.MouseButtonPress, QPointF(0, 0), outside,
+                     Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    ring._catcher.eventFilter(None, ev)
+    assert ring.isHidden() is True
+
+
+def test_click_on_ring_circle_not_intercepted(qapp, tmp_path):
+    """点击圆环上的圆 → 不触发收起（放行给圆环自己处理）。"""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    ring = _ring(tmp_path, qapp)
+    ring.layout_for(QPoint(300, 300), pet_radius=50)
+    ring.show()
+    circle_global = ring.pos() + ring._centers[0]  # 第一个圆的圆心（全局）
+    ev = QMouseEvent(QEvent.MouseButtonPress, QPointF(0, 0),
+                     QPointF(circle_global.x(), circle_global.y()),
+                     Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    ring._catcher.eventFilter(None, ev)
+    assert ring.isVisible() is True

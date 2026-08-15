@@ -7,9 +7,9 @@
 import math
 import os
 
-from PySide6.QtCore import QFileInfo, QPoint, Qt
+from PySide6.QtCore import QEvent, QFileInfo, QObject, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRegion
-from PySide6.QtWidgets import QFileDialog, QFileIconProvider, QWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QFileIconProvider, QWidget
 
 RING_COUNT = 8       # 槽位数
 RING_R = 30          # 圆圈半径
@@ -19,6 +19,28 @@ PAD = 6              # 窗口内边距
 _FILL = QColor(255, 255, 255, 40)      # 圆填充：半透明白
 _EDGE = QColor(255, 255, 255, 200)     # 圆描边
 _PLUS = QColor(255, 255, 255, 230)     # 加号颜色
+
+
+class _ClickCatcher(QObject):
+    """应用级点击监听：圆环展开时，点击圆环窗口以外的空白 → 收起。
+
+    圆环窗口本身有环形蒙版：点圆 → 圆环自己处理；点蒙版空洞（桌宠本体）→
+    穿透给本体（本体的 toggle 收起）；点窗口外空白 → 这里统一收起。
+    """
+
+    def __init__(self, ring, parent=None):
+        super().__init__(parent)
+        self._ring = ring
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress:
+            ring = self._ring
+            if ring.isVisible():
+                pos = event.globalPosition().toPoint()
+                rect = QRect(ring.pos(), ring.size())
+                if not rect.contains(pos):
+                    ring.hide()  # 点击圆环窗口外的空白 → 收起
+        return False
 
 
 class LaunchRing(QWidget):
@@ -34,6 +56,11 @@ class LaunchRing(QWidget):
         self._icon_cache: dict = {}
         self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # 全局空白点击收起（点窗口外空白）
+        self._catcher = _ClickCatcher(self, self)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self._catcher)
         self.hide()
 
     # ---- 布局 ----
