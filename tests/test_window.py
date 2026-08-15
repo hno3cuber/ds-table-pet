@@ -183,3 +183,36 @@ def test_toggle_pause(qapp, tmp_path):
     assert w._paused is True
     w.set_paused(False)
     assert w._paused is False
+
+
+def test_click_toggles_launch_ring(qapp, tmp_path):
+    """短按（无拖动）→ 弹出快捷环；再点 → 收起。"""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    pm = QPixmap(100, 100)
+    pm.fill()
+    w = PetWindow(pm, Config(tmp_path / "config.json"))
+    w.show()
+    assert w._launch_ring.isHidden() is True
+    QTest.mousePress(w, Qt.LeftButton, pos=QPoint(50, 50))
+    QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(50, 50))
+    assert w._launch_ring.isVisible() is True
+    QTest.mousePress(w, Qt.LeftButton, pos=QPoint(50, 50))
+    QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(50, 50))
+    assert w._launch_ring.isHidden() is True
+
+
+def test_drag_does_not_open_launch_ring(qapp, tmp_path):
+    """拖动（有位移）→ 不弹快捷环。"""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    pm = QPixmap(100, 100)
+    pm.fill()
+    w = PetWindow(pm, Config(tmp_path / "config.json"))
+    w.show()
+    QTest.mousePress(w, Qt.LeftButton, pos=QPoint(50, 50))
+    QTest.mouseMove(w, QPoint(60, 60))  # 移动 10px+，超过点击阈值
+    QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(60, 60))
+    assert w._launch_ring.isHidden() is True

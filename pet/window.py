@@ -5,8 +5,10 @@ from PySide6.QtWidgets import QMenu, QVBoxLayout, QWidget
 from pet.actor import ActorWidget
 from pet.geometry import scale_from_drag, scaled_size
 from pet.hud import HudPanel
+from pet.launch_ring import LaunchRing
 
-_POSE_THRESHOLD = 8  # 拖拽超过该像素才切换姿势，防手抖
+_POSE_THRESHOLD = 8      # 拖拽超过该像素才切换姿势，防手抖
+_CLICK_THRESHOLD = 6     # press 与 release 位移小于该值视为「点击」（弹出快捷环）
 
 
 class PetWindow(QWidget):
@@ -18,6 +20,8 @@ class PetWindow(QWidget):
         self._poses = poses if poses else {"normal": pixmap, "up": pixmap, "down": pixmap}
         self._pose = "normal"
         self._drag_start_global = None
+        self._press_global = None
+        self._launch_ring = LaunchRing(config)
         self._scale = max(0.3, float(config.get("window.scale", 1.0)))
         self._paused = False
         self._resize_mode = False
@@ -118,6 +122,17 @@ class PetWindow(QWidget):
         self._actor.set_resize_mode(False)
         self.unsetCursor()
 
+    # ---- 快捷环 ----
+    def _toggle_launch_ring(self):
+        ring = self._launch_ring
+        if ring.isVisible():
+            ring.hide()
+        else:
+            center = self.mapToGlobal(QPoint(self.width() // 2, self.height() // 2))
+            pet_radius = max(self.width(), self.height()) // 2
+            ring.layout_for(center, pet_radius)
+            ring.show()
+
     # ---- 鼠标事件 ----
     def mousePressEvent(self, event):
         if event.button() == Qt.RightButton:
@@ -137,6 +152,7 @@ class PetWindow(QWidget):
                 return
         self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
         self._drag_start_global = event.globalPosition().toPoint()
+        self._press_global = event.globalPosition().toPoint()
         self._resize_corner = None
 
     def mouseMoveEvent(self, event):
@@ -153,6 +169,12 @@ class PetWindow(QWidget):
             return
         if self._resize_corner is not None:
             self._finish_resize()
+        # 点击判定：press 与 release 几乎没位移 → 弹出/收起快捷环
+        if self._resize_corner is None and self._press_global is not None:
+            delta = event.globalPosition().toPoint() - self._press_global
+            if delta.manhattanLength() < _CLICK_THRESHOLD:
+                self._toggle_launch_ring()
+        self._press_global = None
         self._drag_offset = None
         self._drag_start_global = None
         self._set_pose("normal")  # 松开恢复默认形象

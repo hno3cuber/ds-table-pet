@@ -7,6 +7,7 @@ DEFAULT_CONFIG = {
     "window": {"pos": [100, 100], "scale": 1.0},
     "breathing_animation": False,
     "enabled_plugins": ["system_monitor"],
+    "launch_slots": [None] * 8,  # 快捷环 8 个槽位：路径或 null
 }
 
 
@@ -36,6 +37,9 @@ def _value_ok(value, default) -> bool:
             return False
         if not default:
             return True
+        if default[0] is None:
+            # 含空槽位的列表（如 launch_slots）：长度一致且每项为路径或 null
+            return len(value) == len(default) and all(x is None or isinstance(x, str) for x in value)
         if isinstance(default[0], str):
             return all(isinstance(x, str) for x in value)
         return len(value) == len(default) and all(_is_number(x) for x in value)

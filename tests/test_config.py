@@ -35,6 +35,33 @@ def test_defaults_constants_shape():
     assert DEFAULT_CONFIG["enabled_plugins"] == ["system_monitor"]
 
 
+def test_launch_slots_default_empty(tmp_path):
+    cfg = Config(tmp_path / "config.json")
+    slots = cfg.get("launch_slots")
+    assert len(slots) == 8
+    assert all(s is None for s in slots)
+
+
+def test_launch_slots_persist_mixed_paths(tmp_path):
+    p = tmp_path / "config.json"
+    cfg = Config(p)
+    cfg.set("launch_slots", ["C:\\a.lnk", None, "D:\\b.exe", None, None, None, None, None])
+    cfg.save()
+    cfg2 = Config(p)  # 重载：str 与 null 混合应原样保留
+    slots = cfg2.get("launch_slots")
+    assert slots[0] == "C:\\a.lnk"
+    assert slots[1] is None
+    assert slots[2] == "D:\\b.exe"
+    assert len(slots) == 8
+
+
+def test_launch_slots_bad_type_falls_back(tmp_path):
+    p = tmp_path / "config.json"
+    p.write_text('{"launch_slots": "not-a-list"}', encoding="utf-8")
+    cfg = Config(p)
+    assert cfg.get("launch_slots") == [None] * 8
+
+
 def test_bad_typed_values_fall_back_to_defaults(tmp_path):
     """验收第 7 条：改坏字段值（错误类型/非法取值）按默认值兜底。"""
     p = tmp_path / "config.json"
