@@ -196,6 +196,11 @@ class PetWindow(QWidget):
 
     def moveEvent(self, event):
         self._position_hud()
+        # 圆环展开时跟随本体移动（相对位置不变）
+        if self._launch_ring.isVisible():
+            center = self.mapToGlobal(QPoint(self.width() // 2, self.height() // 2))
+            pet_radius = max(self.width(), self.height()) // 2
+            self._launch_ring.layout_for(center, pet_radius)
         super().moveEvent(event)
 
     def showEvent(self, event):

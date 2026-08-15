@@ -72,14 +72,37 @@ def test_launch_calls_startfile(qapp, tmp_path, monkeypatch):
     assert calls == ["C:/fake/app.lnk"]
 
 
-def test_click_blank_hides_ring(qapp, tmp_path):
+def test_ring_has_annular_mask(qapp, tmp_path):
+    """环形蒙版：只有圆本身接收鼠标，中心空洞穿透到本体（点本体才能收起）。"""
     ring = _ring(tmp_path, qapp)
-    centers = ring.layout_for(QPoint(300, 300), pet_radius=50)
-    ring.show()
-    # 点空白（窗口角落，远离所有圆）
-    corner = QPoint(2, 2)
-    assert ring._hit_index(corner) is None
-    from PySide6.QtTest import QTest
-    QTest.mousePress(ring, Qt.LeftButton, pos=corner)
-    QTest.mouseRelease(ring, Qt.LeftButton, pos=corner)
-    assert ring.isHidden() is True
+    ring.layout_for(QPoint(300, 300), pet_radius=50)
+    mask = ring.mask()
+    assert mask is not None
+    assert not mask.isEmpty()
+    # 圆心在蒙版内（圆区域）
+    assert mask.contains(ring._centers[0])
+    # 中心空洞（桌宠本体位置）不在蒙版内 → 事件穿透
+    center = QPoint(ring.width() // 2, ring.height() // 2)
+    assert not mask.contains(center)
+
+
+def test_ring_follows_pet_window_move(qapp, tmp_path):
+    """圆环展开后拖动本体，圆环跟着走（相对位置不变）。"""
+    from pet.window import PetWindow
+    from PySide6.QtGui import QPixmap
+
+    pm = QPixmap(100, 100)
+    pm.fill()
+    w = PetWindow(pm, Config(tmp_path / "config.json"))
+    w.show()
+    w.move(100, 100)  # 先移到正坐标（offscreen 会把负坐标钳制到 0，影响相对位置断言）
+    w._toggle_launch_ring()
+    ring = w._launch_ring
+    assert ring.isVisible()
+    before_center = ring.pos() + QPoint(ring.width() // 2, ring.height() // 2)
+    pet_before = w.pos() + QPoint(50, 50)
+    w.move(300, 250)
+    after_center = ring.pos() + QPoint(ring.width() // 2, ring.height() // 2)
+    pet_after = w.pos() + QPoint(50, 50)
+    # 圆环中心相对本体中心的偏移不变
+    assert (after_center - pet_after) == (before_center - pet_before)

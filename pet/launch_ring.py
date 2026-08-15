@@ -8,12 +8,12 @@ import math
 import os
 
 from PySide6.QtCore import QFileInfo, QPoint, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRegion
 from PySide6.QtWidgets import QFileDialog, QFileIconProvider, QWidget
 
 RING_COUNT = 8       # 槽位数
 RING_R = 30          # 圆圈半径
-RING_GAP = 24        # 圆圈与桌宠边缘间距
+RING_GAP = 10        # 圆圈与桌宠边缘间距
 PAD = 6              # 窗口内边距
 
 _FILL = QColor(255, 255, 255, 40)      # 圆填充：半透明白
@@ -49,7 +49,19 @@ class LaunchRing(QWidget):
             angle = math.radians(i * 360 / RING_COUNT - 90)
             self._centers.append(QPoint(round(cx + ring_radius * math.cos(angle)),
                                         round(cy + ring_radius * math.sin(angle))))
+        self._update_mask()
         return self._centers
+
+    def _update_mask(self):
+        """环形蒙版：只有 8 个圆本身接收鼠标与绘制，中心空洞处点击穿透到下层
+        （桌宠本体），这样点本体收起圆环才能生效。"""
+        path = QPainterPath()
+        for c in self._centers:
+            path.addEllipse(c, RING_R, RING_R)
+        region = QRegion()
+        for poly in path.toFillPolygons():
+            region = region.united(QRegion(poly.toPolygon()))
+        self.setMask(region)
 
     def _hit_index(self, pos: QPoint):
         for i, c in enumerate(self._centers):
