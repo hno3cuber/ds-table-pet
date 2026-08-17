@@ -1,6 +1,6 @@
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QMenu, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QMenu, QVBoxLayout, QWidget
 
 from pet.actor import ActorWidget
 from pet.geometry import scale_from_drag, scaled_size
@@ -224,4 +224,12 @@ class PetWindow(QWidget):
             else:
                 self._enter_resize_mode()
         elif chosen is action_quit:
-            self.close()
+            self._quit()
+
+    def _quit(self):
+        """退出：窗口全是 Qt.Tool 类型（不触发 quitOnLastWindowClosed），
+        必须显式 quit 才会结束事件循环并销毁所有窗口（含 HUD 与快捷环）。"""
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()

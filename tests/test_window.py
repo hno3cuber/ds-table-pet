@@ -185,6 +185,20 @@ def test_toggle_pause(qapp, tmp_path):
     assert w._paused is False
 
 
+def test_quit_calls_app_quit(qapp, tmp_path, monkeypatch):
+    """退出：关闭窗口并显式 quit（Tool 窗口不触发 quitOnLastWindowClosed，
+    否则 HUD/快捷环会残留挂屏）。"""
+    pm = QPixmap(100, 100)
+    pm.fill()
+    w = PetWindow(pm, Config(tmp_path / "config.json"))
+    w.show()
+    calls = []
+    monkeypatch.setattr(qapp, "quit", lambda: calls.append("quit"))
+    w._quit()
+    assert w.isHidden() is True       # 窗口已关
+    assert calls == ["quit"]          # 应用已显式退出
+
+
 def test_click_toggles_launch_ring(qapp, tmp_path):
     """短按（无拖动）→ 弹出快捷环；再点 → 收起。"""
     from PySide6.QtCore import QPoint, Qt
