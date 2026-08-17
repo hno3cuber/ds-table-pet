@@ -1,5 +1,7 @@
+import os
 import signal
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtGui import QPixmap
@@ -9,13 +11,29 @@ from pet.config import Config
 from pet.plugins import PluginManager
 from pet.window import PetWindow
 
-CONFIG_PATH = "config.json"
-PIXMAP_PATH = "picture/ds.png"
+
+def _resource_base() -> Path:
+    """资源根：打包后为 PyInstaller 解包目录（_MEIPASS），开发时为项目根。"""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass)
+    return Path(__file__).parent
+
+
+def _config_dir() -> Path:
+    """配置目录：打包后为 exe 启动目录（可写、可持久化），开发时为项目根。"""
+    if hasattr(sys, "_MEIPASS"):
+        return Path.cwd()
+    return Path(__file__).parent
+
+
+CONFIG_PATH = str(_config_dir() / "config.json")
+PLUGINS_DIR = str(_resource_base() / "plugins")
 # 姿势图集：normal 为默认形象，up/down 为拖拽方向形象
 PIXMAP_PATHS = {
-    "normal": "picture/ds.png",
-    "up": "picture/up.png",
-    "down": "picture/down.png",
+    "normal": str(_resource_base() / "picture" / "ds.png"),
+    "up": str(_resource_base() / "picture" / "up.png"),
+    "down": str(_resource_base() / "picture" / "down.png"),
 }
 
 
@@ -48,7 +66,7 @@ def install_plugins(window: PetWindow, config: Config):
             return plugin_class(interval_ms=interval_ms)
         return plugin_class()
 
-    mgr = PluginManager("plugins", enabled=config.get("enabled_plugins", None), factory=factory)
+    mgr = PluginManager(PLUGINS_DIR, enabled=config.get("enabled_plugins", None), factory=factory)
     plugins = mgr.discover()
     for plugin in plugins:
         window.install_plugin(plugin)
