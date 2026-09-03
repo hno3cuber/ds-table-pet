@@ -61,8 +61,7 @@ def install_plugins(window: PetWindow, config: Config):
 
 def save_state(window: PetWindow, config: Config):
     config.set("window.pos", window.current_pos())
-    config.set("window.scale", window.current_scale())
-    config.save()
+    window.save_scale()
 
 
 def install_sigint_quit(app: QApplication):

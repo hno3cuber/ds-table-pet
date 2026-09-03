@@ -30,11 +30,14 @@ def test_close_saves_position_and_scale(qapp, tmp_path):
     pm.fill()
     w = main.build_window(pm, cfg)
     w.move(321, 123)
-    w._scale = 1.7
+    w._scale_x = 1.7
+    w._scale_y = 1.7
     main.save_state(w, cfg)
     cfg2 = Config(tmp_path / "config.json")
     assert cfg2.get("window.pos") == [321, 123]
-    assert cfg2.get("window.scale") == 1.7
+    assert cfg2.get("window.scale_x") == 1.7
+    assert cfg2.get("window.scale_y") == 1.7
+    assert cfg2.get("window.scale") == 1.7  # 兼容字段
 
 
 def test_state_saver_is_qobject_and_filters(qapp, tmp_path):

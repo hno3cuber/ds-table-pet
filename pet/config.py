@@ -4,7 +4,13 @@ from pathlib import Path
 
 DEFAULT_CONFIG = {
     "refresh_interval_ms": 1000,
-    "window": {"pos": [100, 100], "scale": 1.0},
+    "window": {
+        "pos": [100, 100],
+        "scale": 1.0,
+        # 自由宽高比：scale_x/scale_y 独立；None 表示未设置，回退到 scale
+        "scale_x": None,
+        "scale_y": None,
+    },
     "breathing_animation": False,
     "enabled_plugins": ["system_monitor"],
     "launch_slots": [None] * 8,  # 快捷环 8 个槽位：路径或 null
@@ -28,6 +34,9 @@ def _is_number(value) -> bool:
 
 def _value_ok(value, default) -> bool:
     """按默认值的类型与取值约束校验加载值；非法视为缺失（走默认值）。"""
+    if default is None:
+        # schema 显式标 None 的字段（如 window.scale_x/y）：仅接受 None 或数字
+        return value is None or _is_number(value)
     if isinstance(default, bool):
         return isinstance(value, bool)
     if isinstance(default, (int, float)):

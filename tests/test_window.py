@@ -1,3 +1,4 @@
+from PySide6.QtCore import QPoint
 from PySide6.QtGui import QPixmap
 from pet.config import Config
 from pet.window import PetWindow
@@ -19,18 +20,20 @@ def test_window_min_scale_after_resize_drag(qapp, tmp_path):
     pm.fill()
     cfg = Config(tmp_path / "config.json")
     w = PetWindow(pm, cfg)
+    w.show()
     w._enter_resize_mode()
-    w._begin_resize(3)  # 按下右下角手柄
-    w._apply_resize(-200)  # 向左拖 200px（相对原图 100，触发最小钳制）
-    assert w.current_scale() >= 0.3
+    # 按住右下角手柄，press 在 (95,95)，对角锚点=左上角=(窗口 x, 窗口 y)
+    press = QPoint(w.x() + 95, w.y() + 95)
+    w._begin_resize(3, press)
+    # 拖到锚点位置 → ratio→0 → 钳制到 min_scale
+    w._apply_resize(QPoint(w.x(), w.y()))
+    assert w.current_scale() <= 0.1
 
 
 def test_resize_drag_incremental_scale(qapp, tmp_path):
-    """真实事件流：右下角手柄按下后，多次 move 的 scale 是相对 press 起点的总位移（绝对语义幂等）。
+    """PPT 式角点缩放：拖右下角，光标远离对角锚点 → 放大；靠近 → 缩小。
 
-    使用 QTest 合成 press/move/release，验证：
-    - drag_dx 是相对 press 瞬间的增量，而非光标距窗口左缘的绝对距离；
-    - 连续 move 不会在已更新的 scale 上重复叠加（双重累计）。
+    连续 move 不会双重累计（scale 始终由「当前光标」与 press 起点一次性算出）。
     """
     import pytest
     from PySide6.QtCore import QPoint, Qt
@@ -41,31 +44,136 @@ def test_resize_drag_incremental_scale(qapp, tmp_path):
     cfg = Config(tmp_path / "config.json")
     w = PetWindow(pm, cfg)
     w.show()
+    w.move(100, 100)  # offscreen 会把负坐标钳到 0
     w._enter_resize_mode()
-    # 右下角手柄命中区（局部坐标，窗口 100x100）
+    # 右下角手柄命中区
     QTest.mousePress(w, Qt.LeftButton, pos=QPoint(95, 95))
-    # 右移 50px：总位移 50，scale = 1.0 + 50/100 = 1.5，窗口宽 150
-    QTest.mouseMove(w, QPoint(145, 95))
-    assert w.current_scale() == pytest.approx(1.5, abs=0.1)
-    assert w.width() == pytest.approx(150, abs=1)
-    # 再右移 10px：总位移 60，scale = 1.6（双重累计会得出 2.1）
-    QTest.mouseMove(w, QPoint(155, 95))
-    assert w.current_scale() == pytest.approx(1.6, abs=0.1)
-    # 回拖 50px：总位移 10，scale = 1.1（双重累计会得出 2.2）
-    QTest.mouseMove(w, QPoint(105, 95))
-    assert w.current_scale() == pytest.approx(1.1, abs=0.1)
-    QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(105, 95))
+    # 右下拖 50px：光标沿对角线远离锚点 → 放大（手柄命中在 95，ratio≈1.53）
+    QTest.mouseMove(w, QPoint(145, 145))
+    assert w.current_scale() > 1.3
+    assert w.width() > 130
+    # 再拖：scale 不双重累计（一次性从 press 算）
+    QTest.mouseMove(w, QPoint(155, 155))
+    assert w.current_scale() > 1.5
+    # 回拖：光标回到接近 press 位置 → scale 回到约 1.0
+    QTest.mouseMove(w, QPoint(100, 100))
+    assert w.current_scale() == pytest.approx(1.0, abs=0.2)
+    QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(100, 100))
 
 
-def test_window_min_scale_on_start(qapp, tmp_path):
-    """启动 scale 钳制：config 里合法但小于 0.3 的 scale 被抬到最小 0.3。"""
+def test_resize_anchor_opposite_corner_fixed(qapp, tmp_path):
+    """PPT 式对角锡定：拖右下角时左上角不动，拖左上角时右下角不动。"""
+    import pytest
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
     pm = QPixmap(100, 100)
     pm.fill()
     cfg = Config(tmp_path / "config.json")
-    cfg.set("window.scale", 0.1)
     w = PetWindow(pm, cfg)
-    assert w.current_scale() == 0.3
-    assert w.width() == 30
+    w.show()
+    w.move(200, 200)
+    w._enter_resize_mode()
+
+    # 拖右下角：锡点=左上角 (200,200)，缩放后左上角不动
+    QTest.mousePress(w, Qt.LeftButton, pos=QPoint(95, 95))
+    QTest.mouseMove(w, QPoint(145, 145))  # 放大
+    assert w.x() == 200 and w.y() == 200  # 左上角没动
+    QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(145, 145))
+
+    # 重新进入缩放模式（release 后已退出本次拖拽），拖左上角：锡点=右下角
+    w._enter_resize_mode()
+    old_right = w.x() + w.width()
+    old_bottom = w.y() + w.height()
+    QTest.mousePress(w, Qt.LeftButton, pos=QPoint(5, 5))
+    QTest.mouseMove(w, QPoint(-50, -50))  # 左上角向左上拖 → 放大
+    # 右下角应该钉死不动
+    new_right = w.x() + w.width()
+    new_bottom = w.y() + w.height()
+    assert abs(new_right - old_right) <= 1
+    assert abs(new_bottom - old_bottom) <= 1
+    QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(-50, -50))
+
+
+def test_resize_free_aspect_ratio(qapp, tmp_path):
+    """不锁宽高比：光标只水平移动 → 宽度变、高度不变；scale_x/scale_y 独立。"""
+    import pytest
+    from PySide6.QtCore import QPoint
+
+    pm = QPixmap(200, 100)
+    pm.fill()
+    cfg = Config(tmp_path / "config.json")
+    w = PetWindow(pm, cfg)
+    w.show()
+    w.move(300, 300)
+    w._enter_resize_mode()
+    # 拖右下角：锡=左上 (300,300)；press 在角 (500,400) → start
+    w._begin_resize(3, QPoint(500, 400))
+    w._resize_start_scale = w.current_scale()
+    # 水平向右拖到 (600, 400)：宽度 200→300，高度保持 100 不变
+    w._apply_resize(QPoint(600, 400))
+    assert w.width() == 300
+    assert w.height() == 100  # 高度没变（自由宽高比）
+    sx, sy = w.current_scales()
+    assert sx == pytest.approx(1.5)
+    assert sy == pytest.approx(1.0)
+
+
+def test_resize_save_and_restore_free_aspect(qapp, tmp_path):
+    """自由宽高比（scale_x≠scale_y）保存后重启恢复。"""
+    import pytest
+    from PySide6.QtCore import QPoint
+
+    pm = QPixmap(200, 100)
+    pm.fill()
+    cfg = Config(tmp_path / "config.json")
+    w = PetWindow(pm, cfg)
+    w.show()
+    w.move(300, 300)
+    w._enter_resize_mode()
+    w._begin_resize(3, QPoint(500, 400))
+    w._resize_start_scale = w.current_scale()
+    w._apply_resize(QPoint(600, 400))  # 宽 1.5x，高不变
+    w.save_scale()
+
+    # 重新构建：应恢复 scale_x=1.5, scale_y=1.0
+    w2 = PetWindow(pm, Config(tmp_path / "config.json"))
+    assert w2.current_scales() == (pytest.approx(1.5), pytest.approx(1.0))
+    assert w2.width() == 300
+    assert w2.height() == 100
+
+
+def test_resize_shift_keeps_aspect(qapp, tmp_path):
+    """按住 Shift 拖角 → 等比缩放（scale_x == scale_y）。"""
+    import pytest
+    from PySide6.QtCore import QPoint
+
+    pm = QPixmap(200, 100)
+    pm.fill()
+    cfg = Config(tmp_path / "config.json")
+    w = PetWindow(pm, cfg)
+    w.show()
+    w.move(300, 300)
+    w._enter_resize_mode()
+    w._begin_resize(3, QPoint(500, 400))  # 右下角手柄，锡=左上 (300,300)
+    w._resize_start_scale = w.current_scale()
+    # 按住 Shift 斜向右下拖：等比放大
+    w._apply_resize(QPoint(650, 525), keep_aspect=True)
+    sx, sy = w.current_scales()
+    assert sx == pytest.approx(sy)  # 锁比
+    assert sx > 1.0
+
+
+
+def test_window_min_scale_on_start(qapp, tmp_path):
+    """启动 scale 钳制：config 里合法但小于 0.1 的 scale 被抬到最小 0.1。"""
+    pm = QPixmap(100, 100)
+    pm.fill()
+    cfg = Config(tmp_path / "config.json")
+    cfg.set("window.scale", 0.01)
+    w = PetWindow(pm, cfg)
+    assert w.current_scale() == 0.1
+    assert w.width() == 10
 
 
 def test_hud_is_top_level_window(qapp, tmp_path):

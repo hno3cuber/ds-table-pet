@@ -90,6 +90,39 @@ def test_valid_fields_survive_alongside_bad_ones(tmp_path):
     assert cfg.get("refresh_interval_ms") == 500
 
 
+def test_scale_x_y_roundtrip_survives_reload(tmp_path):
+    """自由宽高比：window.scale_x/scale_y 持久化后重载不丢。"""
+    p = tmp_path / "config.json"
+    cfg = Config(p)
+    cfg.set("window.scale_x", 1.7)
+    cfg.set("window.scale_y", 0.6)
+    cfg.save()
+    cfg2 = Config(p)
+    assert cfg2.get("window.scale_x") == 1.7
+    assert cfg2.get("window.scale_y") == 0.6
+
+
+def test_scale_x_y_default_none_when_absent(tmp_path):
+    """旧 config（只有 scale）加载后 scale_x/scale_y 为 None（回退等比 scale）。"""
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({"window": {"pos": [1, 2], "scale": 1.5}}), encoding="utf-8")
+    cfg = Config(p)
+    assert cfg.get("window.scale") == 1.5
+    assert cfg.get("window.scale_x") is None
+    assert cfg.get("window.scale_y") is None
+
+
+def test_bad_scale_x_y_fall_back(tmp_path):
+    """scale_x/scale_y 非法（非数字）时被过滤为 None，不影响 window.scale。"""
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({"window": {"scale_x": "wide", "scale": 1.2}}), encoding="utf-8")
+    cfg = Config(p)
+    assert cfg.get("window.scale") == 1.2
+    assert cfg.get("window.scale_x") is None
+    assert cfg.get("window.scale_y") is None
+
+
+
 def test_non_dict_config_falls_back_to_defaults(tmp_path):
     """顶层非对象（数组/标量）整体按缺失处理，不崩溃。"""
     p = tmp_path / "config.json"

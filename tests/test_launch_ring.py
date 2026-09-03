@@ -108,6 +108,36 @@ def test_ring_follows_pet_window_move(qapp, tmp_path):
     assert (after_center - pet_after) == (before_center - pet_before)
 
 
+def test_ring_follows_pet_window_resize(qapp, tmp_path):
+    """圆环展开后缩放本体，圆环按新的本体半径重新布局：
+    环窗口尺寸随 pet_radius 变化，且环中心仍与本体中心重合。"""
+    import pytest
+    from pet.window import PetWindow
+    from PySide6.QtGui import QPixmap
+
+    pm = QPixmap(200, 200)
+    pm.fill()
+    w = PetWindow(pm, Config(tmp_path / "config.json"))
+    w.show()
+    w._toggle_launch_ring()
+    ring = w._launch_ring
+    assert ring.isVisible()
+    size_before = ring.size()
+
+    w._enter_resize_mode()
+    w._begin_resize(3, QPoint(w.x() + w.width() - 3, w.y() + w.height() - 3))
+    w._resize_start_scale = w.current_scale()  # press 起点的 scale
+    w._apply_resize(QPoint(w.x() + w.width() - 3 - 100, w.y() + w.height() - 3 - 100))  # 缩到 0.5
+
+    assert w.current_scale() == pytest.approx(0.5, abs=0.05)
+    # 本体变小 -> 环窗口跟着变小
+    assert ring.width() < size_before.width()
+    # 环中心仍与本体中心重合（相对本体偏移不变）
+    pet_center = w.pos() + QPoint(w.width() // 2, w.height() // 2)
+    ring_center = ring.pos() + QPoint(ring.width() // 2, ring.height() // 2)
+    assert (ring_center - pet_center).manhattanLength() <= 2
+
+
 def test_click_outside_ring_hides_it(qapp, tmp_path):
     """圆环展开时点击窗口外空白 → 收起（全局点击监听）。"""
     from PySide6.QtCore import QEvent, QPointF
