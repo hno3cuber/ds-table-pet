@@ -89,6 +89,10 @@ class PetWindow(QWidget):
         """进入缩放模式：显示选框与手柄，等待用户按角点。"""
         self._resize_mode = True
         self._actor.set_resize_mode(True)
+        # 本体（含调整框）盖到快捷环之上：环的对角圆与角色四角几何重叠，
+        # 同为置顶窗口时后 raise/activate 的在上，否则手柄被环遮住点不到。
+        self.raise_()
+        self.activateWindow()
 
     def _begin_resize(self, corner: int, press_global: QPoint):
         """用户按住了某个角点手柄，开始一次拖拽。

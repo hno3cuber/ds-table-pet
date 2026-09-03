@@ -201,6 +201,21 @@ def test_hud_follows_window_position(qapp, tmp_path):
     assert hud.pos().y() == w.pos().y()
 
 
+def test_enter_resize_mode_brings_pet_to_front(qapp, tmp_path, monkeypatch):
+    """进入缩放模式时把本体 raise + activate，让调整框盖在快捷环之上
+    （环的对角圆与角色四角重叠，不置顶则手柄被环遮住点不到）。"""
+    pm = QPixmap(100, 100)
+    pm.fill()
+    w = PetWindow(pm, Config(tmp_path / "config.json"))
+    w.show()
+    calls = []
+    monkeypatch.setattr(w, "raise_", lambda: calls.append("raise"))
+    monkeypatch.setattr(w, "activateWindow", lambda: calls.append("activate"))
+    w._enter_resize_mode()
+    assert w._resize_mode is True
+    assert calls == ["raise", "activate"]
+
+
 def test_hud_fade_out_hides(qapp, tmp_path):
     """顶层窗口上 windowOpacity 动画有效，fade_out 完成（opacity<=0.01）后触发 hide。"""
     from PySide6.QtTest import QTest
