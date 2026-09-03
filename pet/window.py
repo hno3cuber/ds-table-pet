@@ -7,7 +7,6 @@ from pet.geometry import scale_from_drag, scaled_size
 from pet.hud import HudPanel
 from pet.launch_ring import LaunchRing
 
-_POSE_THRESHOLD = 8      # 拖拽超过该像素才切换姿势，防手抖
 _CLICK_THRESHOLD = 6     # press 与 release 位移小于该值视为「点击」（弹出快捷环）
 
 
@@ -16,10 +15,6 @@ class PetWindow(QWidget):
         super().__init__()
         self._pixmap = pixmap
         self._config = config
-        # 姿势图集：normal/up/down；未提供时全部回退到默认图（保持既有调用兼容）
-        self._poses = poses if poses else {"normal": pixmap, "up": pixmap, "down": pixmap}
-        self._pose = "normal"
-        self._drag_start_global = None
         self._press_global = None
         self._launch_ring = LaunchRing(config)
         self._scale = max(0.3, float(config.get("window.scale", 1.0)))
@@ -51,26 +46,6 @@ class PetWindow(QWidget):
         self.resize(w, h)
         pos = self._config.get("window.pos", [100, 100])
         self.move(pos[0], pos[1])
-
-    # ---- 姿势切换（拖拽方向联动） ----
-    def _set_pose(self, name: str):
-        if self._pose == name:
-            return
-        self._pose = name
-        pixmap = self._poses.get(name) or self._poses["normal"]
-        self._actor.set_pixmap(pixmap)
-
-    def _update_pose(self, global_pos: QPoint):
-        """按全局位移判定方向：上拖过阈值 → up，下拖过阈值 → down，否则 normal。"""
-        if self._drag_start_global is None:
-            return
-        dy = global_pos.y() - self._drag_start_global.y()
-        if dy < -_POSE_THRESHOLD:
-            self._set_pose("up")
-        elif dy > _POSE_THRESHOLD:
-            self._set_pose("down")
-        else:
-            self._set_pose("normal")
 
     # ---- 查询 ----
     def current_scale(self) -> float:
@@ -151,7 +126,6 @@ class PetWindow(QWidget):
                 self._drag_offset = None
                 return
         self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-        self._drag_start_global = event.globalPosition().toPoint()
         self._press_global = event.globalPosition().toPoint()
         self._resize_corner = None
 
@@ -162,7 +136,6 @@ class PetWindow(QWidget):
             return
         if self._drag_offset is not None:
             self.move(event.globalPosition().toPoint() - self._drag_offset)
-            self._update_pose(event.globalPosition().toPoint())
 
     def mouseReleaseEvent(self, event):
         if event.button() != Qt.LeftButton:
@@ -176,8 +149,6 @@ class PetWindow(QWidget):
                 self._toggle_launch_ring()
         self._press_global = None
         self._drag_offset = None
-        self._drag_start_global = None
-        self._set_pose("normal")  # 松开恢复默认形象
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape and self._resize_mode:

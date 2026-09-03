@@ -5,7 +5,7 @@ import main
 
 
 def test_main_loads_pixmap(qapp, tmp_path):
-    pm = main.load_pixmap("picture/ds.png")
+    pm = main.load_pixmap(main.PIXMAP_PATH)
     assert not pm.isNull()
 
 
@@ -66,21 +66,10 @@ def test_install_sigint_quit_registers_handler(qapp):
         signal.signal(signal.SIGINT, original)
 
 
-def test_load_poses_loads_all(qapp):
-    """姿势图集：normal/up/down 三张都能从 picture/ 加载且非空。"""
-    poses = main.load_poses()
-    assert set(poses.keys()) == {"normal", "up", "down"}
-    assert not poses["normal"].isNull()
-    assert not poses["up"].isNull()
-    assert not poses["down"].isNull()
-
-
-def test_load_poses_falls_back_when_missing(qapp, monkeypatch):
-    """姿势图缺失时回退到 normal，不崩溃。"""
-    monkeypatch.setitem(main.PIXMAP_PATHS, "up", "picture/不存在.png")
-    poses = main.load_poses()
-    assert poses["up"] is poses["normal"]  # 引用相等 = 回退到同一对象
-    assert not poses["down"].isNull()
+def test_load_default_pixmap(qapp):
+    """默认形象 idel.png 能从 picture/ 加载且非空。"""
+    pm = main.load_pixmap(main.PIXMAP_PATH)
+    assert not pm.isNull()
 
 
 def test_install_plugins_passes_interval(qapp, tmp_path):
