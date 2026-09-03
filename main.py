@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QImageReader, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from pet.config import Config
@@ -29,7 +29,8 @@ def _config_dir() -> Path:
 
 CONFIG_PATH = str(_config_dir() / "config.json")
 PLUGINS_DIR = str(_resource_base() / "plugins")
-PIXMAP_PATH = str(_resource_base() / "picture" / "idel.png")
+PIXMAP_PATH = str(_resource_base() / "picture" / "idel.gif")   # 站立循环动画（首帧兼作窗口尺寸基准）
+WALK_PATH = str(_resource_base() / "picture" / "walk.gif")
 
 
 def load_pixmap(path: str) -> QPixmap:
@@ -39,8 +40,30 @@ def load_pixmap(path: str) -> QPixmap:
     return pm
 
 
-def build_window(pixmap: QPixmap, config: Config) -> PetWindow:
-    return PetWindow(pixmap, config)
+def load_gif_frames(path: str) -> tuple:
+    """把 GIF 逐帧读进内存（不落盘切片），返回 (frames, delays) 元组。
+
+    frames — QPixmap 帧列表；delays — 每帧对应延迟（ms），动画节奏不均匀的
+    素材按帧保留。文件缺失/不可读/无帧时返回空列表，调用方据此禁用。
+    """
+    reader = QImageReader(path)
+    frames, delays = [], []
+    if reader.canRead():
+        # read() 对动画格式逐帧顺序推进；nextImageDelay 在 read 前读取当前帧延迟
+        while True:
+            delay = reader.nextImageDelay()
+            image = reader.read()
+            if image.isNull():
+                break
+            frames.append(QPixmap.fromImage(image))
+            delays.append(delay)
+    return frames, delays
+
+
+def build_window(pixmap: QPixmap, config: Config, idle_frames=None,
+                 idle_delays=None, walk_frames=None) -> PetWindow:
+    return PetWindow(pixmap, config, idle_frames=idle_frames,
+                     idle_delays=idle_delays, walk_frames=walk_frames)
 
 
 def install_plugins(window: PetWindow, config: Config):
@@ -80,7 +103,10 @@ def main():
     app = QApplication(sys.argv)
     config = Config(CONFIG_PATH)
     pixmap = load_pixmap(PIXMAP_PATH)
-    window = build_window(pixmap, config)
+    idle_frames, idle_delays = load_gif_frames(PIXMAP_PATH)  # 站立循环动画
+    walk_frames, _ = load_gif_frames(WALK_PATH)              # 空 → 无行走，wander 自动关
+    window = build_window(pixmap, config, idle_frames=idle_frames,
+                          idle_delays=idle_delays, walk_frames=walk_frames)
     mgr = install_plugins(window, config)
     window.show()
     window.installEventFilter(_StateSaver(window, config))

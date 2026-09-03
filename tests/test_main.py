@@ -136,6 +136,56 @@ def test_install_plugins_discovers_real_monitor(qapp, tmp_path):
         mgr.stop_all()  # 收尾停采集线程，避免测试进程残留
 
 
+def test_load_walk_gif_frames(qapp):
+    """walk.gif 内存拆帧：25 帧、尺寸一致、延迟信息齐全。"""
+    frames, delays = main.load_gif_frames(main.WALK_PATH)
+    assert len(frames) == 25
+    sizes = {f.size() for f in frames}
+    assert sizes == {frames[0].size()}
+    assert frames[0].width() == 720 and frames[0].height() == 960
+    assert len(delays) == 25
+    assert all(d > 0 for d in delays)
+
+
+def test_load_idle_gif_frames(qapp):
+    """idel.gif（站立循环）内存拆帧：89 帧、与行走同画布。"""
+    frames, delays = main.load_gif_frames(main.PIXMAP_PATH)
+    assert len(frames) == 89
+    assert frames[0].width() == 720 and frames[0].height() == 960
+    # 节奏不均匀素材按帧保留延迟（实测含 40~100ms 混合）
+    assert len(set(delays)) > 1
+
+
+def test_load_gif_frames_missing_returns_empty(qapp, tmp_path):
+    """GIF 缺失/不可读 → 空元组（自由走动自动禁用，不崩）。"""
+    assert main.load_gif_frames(str(tmp_path / "nope.gif")) == ([], [])
+
+
+def test_build_window_with_walk_frames_enables_wander(qapp, tmp_path):
+    """装配带行走帧 → wander 随 config 默认开启。"""
+    pm = QPixmap(100, 200)
+    pm.fill()
+    frames = [QPixmap(10, 10)]
+    frames[0].fill()
+    cfg = Config(tmp_path / "config.json")
+    w = main.build_window(pm, cfg, walk_frames=frames)
+    assert w._walk_frames == frames
+    assert w._wander_enabled is True
+
+
+def test_build_window_with_idle_frames_plays_idle(qapp, tmp_path):
+    """装配带站立循环帧、无行走帧 → 不走动，站立动画独立播放。"""
+    pm = QPixmap(100, 200)
+    pm.fill()
+    idle = [QPixmap(10, 10)]
+    idle[0].fill()
+    cfg = Config(tmp_path / "config.json")
+    w = main.build_window(pm, cfg, idle_frames=idle, idle_delays=[100])
+    assert w._wander_enabled is False
+    assert w._actor._frames == idle          # 站立循环已挂载
+    assert w._idle_timer.isActive() is True  # 且正在播放
+
+
 def test_build_window_with_bad_config_values_does_not_raise(qapp, tmp_path):
     """验收第 7 条冒烟链：坏字段值构建 PetWindow 不抛异常，按默认值兜底。"""
     import json

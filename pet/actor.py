@@ -17,6 +17,10 @@ class ActorWidget(QWidget):
         self.resize(*scaled_size(pixmap.width(), pixmap.height(), scale))
         self._resize_mode = False
         self._breath = 0.0
+        self._frames = None       # 行走动画帧序列；None = 静态立绘模式
+        self._frame_index = 0
+        self._mirror = False      # 朝右走时水平翻转（walk.gif 素材默认朝左）
+        self._content_scale = 1.0  # 动画帧相对静态立绘的视觉大小修正（素材角色占比差异）
         self._breath_anim = QPropertyAnimation(self, b"breath", self)
         self._breath_anim.setDuration(3000)
         self._breath_anim.setStartValue(0.0)
@@ -77,12 +81,61 @@ class ActorWidget(QWidget):
                 return idx
         return None
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        painter.setRenderHint(QPainter.Antialiasing, True)
+    def set_animation_frames(self, frames, content_scale: float = 1.0):
+        """切换到行走动画模式（帧序列），从第 0 帧开始。
+
+        content_scale 对适配后的帧再做等比缩放：不同素材画布里角色占比
+        不同（站立留白多、行走画得满），用它把行走角色对齐到站立立绘的
+        视觉大小。传 None 或空列表回到静态立绘模式。"""
+        self._frames = list(frames) if frames else None
+        self._frame_index = 0
+        self._content_scale = content_scale if self._frames else 1.0
+        self.update()
+
+    def set_frame_index(self, index: int):
+        """跳到第 index 帧（自动取模循环）。静态模式忽略。"""
+        if self._frames:
+            self._frame_index = index % len(self._frames)
+            self.update()
+
+    def set_mirror(self, on: bool):
+        """水平翻转画面（素材默认朝左，朝右走时镜像）。"""
+        if on != self._mirror:
+            self._mirror = on
+            self.update()
+
+    def _content_rect(self, src_w: int, src_h: int):
+        """动画帧的适配矩形：保持源宽高比放进 widget、贴底水平居中。
+
+        站立立绘（864x1222）与行走画布（720x960）比例不同，整幅拉伸会变形；
+        贴底对齐保证切换瞬间脚底高度一致，角色不悬空、不穿地。
+        """
+        tw, th = self.width(), self.height()
+        if tw <= 0 or th <= 0 or src_w <= 0 or src_h <= 0:
+            return QRect(0, 0, tw, th)
+        scale = min(tw / src_w, th / src_h)
+        w = max(1, round(src_w * scale))
+        h = max(1, round(src_h * scale))
+        # 素材角色占比修正：等比缩小到 content_scale，仍贴底居中（脚不悬空）
+        w = max(1, round(w * self._content_scale))
+        h = max(1, round(h * self._content_scale))
+        return QRect((tw - w) // 2, th - h, w, h)
+
+    def _paint_animation_frame(self, painter: QPainter):
+        frame = self._frames[self._frame_index % len(self._frames)]
+        rect = self._content_rect(frame.width(), frame.height())
+        painter.save()
+        if self._mirror:
+            # 原点移到目标矩形右缘后水平反向：x 从右往左填充 = 镜像
+            painter.translate(rect.left() + rect.width(), rect.top())
+            painter.scale(-1.0, 1.0)
+            painter.drawPixmap(0, 0, rect.width(), rect.height(), frame)
+        else:
+            painter.drawPixmap(rect, frame, QRect(frame.rect()))
+        painter.restore()
+
+    def _paint_static(self, painter: QPainter):
         breath_factor = 1.0 + (self._breath - 0.5) * 2 * _BREATH_MAX
-        target = self.rect().size()
         scaled = QPixmap(self._pixmap.size())
         scaled.fill(Qt.transparent)
         sp = QPainter(scaled)
@@ -91,6 +144,15 @@ class ActorWidget(QWidget):
         sp.drawPixmap(0, 0, self._pixmap)
         sp.end()
         painter.drawPixmap(self.rect(), scaled, scaled.rect())
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        if self._frames:
+            self._paint_animation_frame(painter)
+        else:
+            self._paint_static(painter)
         if self._resize_mode:
             pen = QPen(QColor(255, 255, 255, 220), 2)
             painter.setPen(pen)

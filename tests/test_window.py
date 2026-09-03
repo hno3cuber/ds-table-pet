@@ -315,3 +315,284 @@ def test_drag_does_not_open_launch_ring(qapp, tmp_path):
     QTest.mouseMove(w, QPoint(60, 60))  # 移动 10px+，超过点击阈值
     QTest.mouseRelease(w, Qt.LeftButton, pos=QPoint(60, 60))
     assert w._launch_ring.isHidden() is True
+
+
+# ---- 自由走动（随机站/走 + 边缘掉头） ----
+
+def _make_walk_window(qapp, tmp_path, n_frames=4, wander=True):
+    """构造带行走帧序列的窗口；默认关闭 wander 由测试自行驱动。"""
+    pm = QPixmap(200, 300)
+    pm.fill()
+    frames = []
+    for _ in range(n_frames):
+        f = QPixmap(60, 80)
+        f.fill()
+        frames.append(f)
+    cfg = Config(tmp_path / "config.json")
+    cfg.set("wander.enabled", wander)
+    w = PetWindow(pm, cfg, walk_frames=frames)
+    w._halt_wander()  # 清掉构造时排程，从已知静止状态出发
+    return w
+
+
+def test_wander_disabled_without_frames(qapp, tmp_path):
+    """没有行走帧时（旧调用/资源缺失）wander 强制关闭，不排程不崩溃。"""
+    pm = QPixmap(100, 100)
+    pm.fill()
+    cfg = Config(tmp_path / "config.json")
+    cfg.set("wander.enabled", True)
+    w = PetWindow(pm, cfg)  # 无 walk_frames
+    assert w._wander_enabled is False
+    assert w._hold_timer.isActive() is False
+
+
+def test_wander_disabled_by_config(qapp, tmp_path):
+    """config wander.enabled=False → 构造后不进入走动状态机。"""
+    w = _make_walk_window(qapp, tmp_path, wander=False)
+    assert w._wander_enabled is False
+    assert w._hold_timer.isActive() is False
+
+
+def test_wander_enable_starts_idle_schedule(qapp, tmp_path):
+    """开启 wander → 从站立开始，hold 定时器已排程。"""
+    w = _make_walk_window(qapp, tmp_path)
+    w.set_wander_enabled(True)
+    assert w._wander_enabled is True
+    assert w._walking is False          # 先站立
+    assert w._hold_timer.isActive() is True
+    assert w._actor._frames is None     # 静态立绘
+
+
+def test_wander_walking_advances_frame_and_moves(qapp, tmp_path, monkeypatch):
+    """行走 tick：位置刷新平滑移动、动画 tick 切下一帧（两者解耦）。"""
+    w = _make_walk_window(qapp, tmp_path)
+    monkeypatch.setattr(w, "_wander_bounds", lambda: (0, 1000))
+    w.set_wander_enabled(True)
+    w._start_walking()
+    w._wander_dir = -1
+    w._actor.set_mirror(False)
+    w.move(500, 100)
+    w._wander_move_tick()          # 位置：4px 平滑步
+    assert w.pos().x() == 500 - 4
+    assert w._actor._mirror is False   # 朝左（素材默认方向）不镜像
+    w._wander_frame_tick()         # 动画：切下一帧
+    assert w._wander_frame == 1
+    assert w._actor._frame_index == 1
+    assert w._actor._frames is not None
+
+
+def test_wander_bounces_at_left_edge_and_mirrors(qapp, tmp_path, monkeypatch):
+    """走到屏幕左缘 → 钳回边界、掉头朝右、镜像翻转素材。"""
+    w = _make_walk_window(qapp, tmp_path)
+    monkeypatch.setattr(w, "_wander_bounds", lambda: (0, 1000))
+    w.set_wander_enabled(True)
+    w._start_walking()
+    w._wander_dir = -1
+    w._actor.set_mirror(False)
+    w.move(1, 100)
+    w._wander_move_tick()  # 1 - 2 → 越界 → 钳到 0 并掉头朝右
+    assert w.pos().x() == 0
+    assert w._wander_dir == 1
+    assert w._actor._mirror is True     # 朝右走 → 素材水平翻转
+
+
+def test_wander_bounces_at_right_edge(qapp, tmp_path, monkeypatch):
+    """右缘掉头：x = right - width 处朝右走 → 钳回并掉头朝左。"""
+    w = _make_walk_window(qapp, tmp_path)  # 窗口宽 = pixmap 宽 200
+    monkeypatch.setattr(w, "_wander_bounds", lambda: (0, 500))
+    w.set_wander_enabled(True)
+    w._start_walking()
+    w._wander_dir = 1
+    w._actor.set_mirror(True)
+    w.move(299, 100)  # 右缘 499 < 500，再走一步就出界
+    w._wander_move_tick()
+    assert w.pos().x() == 500 - 200   # 钳回 right - width
+    assert w._wander_dir == -1
+    assert w._actor._mirror is False
+
+
+def test_wander_hold_elapsed_switches_state(qapp, tmp_path):
+    """hold 到点：站立→行走、行走→站立 自动轮转。"""
+    w = _make_walk_window(qapp, tmp_path)
+    w.set_wander_enabled(True)
+    w._hold_timer.stop()
+    # 站立到点 → 开始行走
+    w._walking = False
+    w._on_wander_hold()
+    assert w._walking is True
+    assert w._walk_timer.isActive() is True
+    assert w._frame_timer.isActive() is True   # 位移与动画帧两个 timer 都已驱动
+    # 行走时长到点 → 回到站立
+    w._walking = True
+    w._on_wander_hold()
+    assert w._walking is False
+    assert w._actor._frames is None
+    assert w._walk_timer.isActive() is False
+    assert w._hold_timer.isActive() is True   # 已排下一次
+
+
+def test_wander_touch_interrupt_stops_walking(qapp, tmp_path):
+    """鼠标按下（开始拖/点）→ 立即停走回站立并进入安静期。"""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    w = _make_walk_window(qapp, tmp_path)
+    w.set_wander_enabled(True)
+    w._start_walking()
+    assert w._walking is True
+    w.show()
+    QTest.mousePress(w, Qt.LeftButton, pos=QPoint(10, 10))
+    assert w._walking is False
+    assert w._actor._frames is None
+    assert w._walk_timer.isActive() is False
+    assert w._frame_timer.isActive() is False
+    assert w._hold_timer.isActive() is True  # 安静期已排程
+
+
+def test_wander_pause_halts_and_resume_restarts(qapp, tmp_path):
+    """暂停监控 → 走动状态机停摆；恢复 → 重新从站立排程。"""
+    w = _make_walk_window(qapp, tmp_path)
+    w.set_wander_enabled(True)
+    w._start_walking()
+    assert w._walking is True
+    w.set_paused(True)
+    assert w._walking is False
+    assert w._walk_timer.isActive() is False
+    assert w._frame_timer.isActive() is False
+    assert w._hold_timer.isActive() is False
+    w.set_paused(False)
+    assert w._walk_timer.isActive() is False
+    assert w._hold_timer.isActive() is True   # 恢复后从站立重新随机
+
+
+def test_wander_resize_mode_halts_and_exit_resumes(qapp, tmp_path):
+    """进入缩放模式 → 停走；退出缩放 → 恢复站立排程。"""
+    w = _make_walk_window(qapp, tmp_path)
+    w.set_wander_enabled(True)
+    w._start_walking()
+    assert w._walking is True
+    w._enter_resize_mode()
+    assert w._walking is False
+    assert w._walk_timer.isActive() is False
+    assert w._frame_timer.isActive() is False
+    w._exit_resize_mode()
+    assert w._hold_timer.isActive() is True
+
+
+def test_wander_disable_stops_everything(qapp, tmp_path):
+    """菜单关闭自由走动 → 立即停走，不再排程。"""
+    w = _make_walk_window(qapp, tmp_path)
+    w.set_wander_enabled(True)
+    w._start_walking()
+    w.set_wander_enabled(False)
+    assert w._wander_enabled is False
+    assert w._walking is False
+    assert w._walk_timer.isActive() is False
+    assert w._frame_timer.isActive() is False
+    assert w._hold_timer.isActive() is False
+    assert w._actor._frames is None
+
+
+def test_wander_frame_loops_around(qapp, tmp_path, monkeypatch):
+    """帧序列走到末尾自动绕回第 0 帧。"""
+    w = _make_walk_window(qapp, tmp_path, n_frames=3)
+    monkeypatch.setattr(w, "_wander_bounds", lambda: (0, 5000))
+    w.set_wander_enabled(True)
+    w._start_walking()
+    w.move(3000, 100)
+    for _ in range(5):
+        w._wander_frame_tick()
+    assert w._wander_frame == 5 % 3
+    assert w._actor._frame_index == 5 % 3
+
+
+# ---- 站立循环动画（idel.gif 帧播放） ----
+
+def _make_idle_window(qapp, tmp_path, n_frames=4, with_walk=False):
+    """构造带站立循环帧的窗口。with_walk=True 时同时带行走帧（走动开着）。"""
+    pm = QPixmap(200, 300)
+    pm.fill()
+    idle = []
+    for _ in range(n_frames):
+        f = QPixmap(60, 80)
+        f.fill()
+        idle.append(f)
+    walk = None
+    if with_walk:
+        walk = []
+        for _ in range(3):
+            f = QPixmap(60, 80)
+            f.fill()
+            walk.append(f)
+    cfg = Config(tmp_path / "config.json")
+    cfg.set("wander.enabled", True)
+    w = PetWindow(pm, cfg, idle_frames=idle, idle_delays=[40, 40, 40, 40],
+                  walk_frames=walk)
+    return w
+
+
+def test_idle_frames_play_without_walk(qapp, tmp_path):
+    """只有站立循环素材（无行走帧）→ 不走动，站立动画独立播放。"""
+    w = _make_idle_window(qapp, tmp_path, with_walk=False)
+    assert w._wander_enabled is False
+    assert w._walking is False
+    assert w._actor._frames is not None     # 站立循环已挂载
+    assert w._idle_timer.isActive() is True
+    assert w._hold_timer.isActive() is False  # 不排行走
+
+
+def test_idle_frame_advances(qapp, tmp_path):
+    """站立循环 tick：按素材延迟推进下一帧并绕回。"""
+    w = _make_idle_window(qapp, tmp_path, n_frames=3, with_walk=False)
+    assert w._idle_frame == 0
+    w._idle_frame_tick()
+    assert w._idle_frame == 1
+    assert w._actor._frame_index == 1
+    w._idle_frame_tick()
+    w._idle_frame_tick()
+    assert w._idle_frame == 0   # 3 帧循环绕回
+
+
+def test_idle_walk_switch_frames(qapp, tmp_path):
+    """站立↔行走状态切换时动画源随之切换，站立循环让位给行走帧再恢复。"""
+    w = _make_idle_window(qapp, tmp_path, with_walk=True)
+    assert w._wander_enabled is True
+    idle_len = len(w._idle_frames)
+    assert len(w._actor._frames) == idle_len    # 初始：站立循环
+    assert w._idle_timer.isActive() is True
+
+    w._start_walking()
+    assert len(w._actor._frames) == len(w._walk_frames)  # 切到行走帧
+    assert w._idle_timer.isActive() is False              # 站立 timer 让位
+    assert w._frame_timer.isActive() is True
+
+    w._enter_idle()
+    assert len(w._actor._frames) == idle_len              # 回到站立循环
+    assert w._idle_timer.isActive() is True
+    assert w._frame_timer.isActive() is False
+
+
+def test_idle_halt_freezes_and_resume_plays(qapp, tmp_path):
+    """暂停监控：站立循环冻结回静态；恢复：站立循环继续（无走动也如此）。"""
+    w = _make_idle_window(qapp, tmp_path, with_walk=False)
+    assert w._idle_timer.isActive() is True
+    w.set_paused(True)
+    assert w._actor._frames is None          # 冻结回静态首帧
+    assert w._idle_timer.isActive() is False
+    w.set_paused(False)
+    assert w._actor._frames is not None      # 恢复站立循环
+    assert w._idle_timer.isActive() is True
+
+
+def test_idle_walk_stop_wander_keeps_idle(qapp, tmp_path):
+    """菜单关掉自由走动：行走停止，站立循环保留（宠物安静但活着）。"""
+    w = _make_idle_window(qapp, tmp_path, with_walk=True)
+    w._start_walking()
+    assert w._walking is True
+    w.set_wander_enabled(False)
+    assert w._wander_enabled is False
+    assert w._walking is False
+    assert w._walk_timer.isActive() is False
+    assert w._hold_timer.isActive() is False
+    assert len(w._actor._frames) == len(w._idle_frames)  # 回站立循环
+    assert w._idle_timer.isActive() is True

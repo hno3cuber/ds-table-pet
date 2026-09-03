@@ -12,6 +12,7 @@ DEFAULT_CONFIG = {
         "scale_y": None,
     },
     "breathing_animation": False,
+    "wander": {"enabled": True},
     "enabled_plugins": ["system_monitor"],
     "launch_slots": [None] * 8,  # 快捷环 8 个槽位：路径或 null
 }

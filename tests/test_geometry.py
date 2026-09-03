@@ -5,6 +5,7 @@ from pet.geometry import (
     scale_from_corner_drag,
     corner_resize_size,
     anchor_and_topleft,
+    wander_step_x,
 )
 
 
@@ -108,3 +109,44 @@ def test_anchor_topleft_corner2_left_bottom():
     anchor, tl = anchor_and_topleft(2, (100, 200), (200, 300), (100, 150))
     assert anchor == (300, 200)
     assert tl == (200, 200)
+
+
+# ---- 自由走动：水平步进 + 边缘掉头 ----
+
+def test_wander_step_plain_left():
+    """朝左走一步：x 减小，方向不变。"""
+    assert wander_step_x(500, -1, 8, 0, 800, 100) == (492, -1)
+
+
+def test_wander_step_plain_right():
+    """朝右走一步：x 增大，方向不变。"""
+    assert wander_step_x(500, 1, 8, 0, 800, 100) == (508, 1)
+
+
+def test_wander_step_bounce_at_left_edge():
+    """越过左缘 → 钳到 left 并掉头朝右。"""
+    assert wander_step_x(4, -1, 8, 0, 800, 100) == (0, 1)
+
+
+def test_wander_step_bounce_at_right_edge():
+    """窗口右缘贴 right 时 x=right-width；再向右越界 → 钳回并掉头朝左。"""
+    assert wander_step_x(695, 1, 8, 0, 800, 100) == (700, -1)  # 700 = 800-100
+
+
+def test_wander_step_already_at_left_edge_keeps_bouncing():
+    """已经贴左缘还朝左走 → 原地不动并掉头（不掉出边界）。"""
+    assert wander_step_x(0, -1, 8, 0, 800, 100) == (0, 1)
+
+
+def test_wander_step_already_at_right_edge_keeps_bouncing():
+    """已经贴右缘还朝右走 → 原地不动并掉头。"""
+    assert wander_step_x(700, 1, 8, 0, 800, 100) == (700, -1)
+
+
+def test_wander_step_wider_than_room_stays_put():
+    """退化：窗口比可用区还宽（right-width <= left）→ 钳到左缘原地停，
+    方向不变，不左右贴边抖动。"""
+    # 左缘 0 右缘 100，窗口宽 150 → right_max = -50 <= 0
+    assert wander_step_x(200, -1, 8, 0, 100, 150) == (0, -1)
+    assert wander_step_x(0, -1, 8, 0, 100, 150) == (0, -1)
+    assert wander_step_x(-5, 1, 8, 0, 100, 150) == (0, 1)

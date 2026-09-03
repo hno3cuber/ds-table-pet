@@ -76,3 +76,34 @@ def anchor_and_topleft(corner: int, old_top_left, old_size, new_size):
         3: (ax, ay),
     }[corner]
     return (ax, ay), topleft
+
+
+def wander_step_x(
+    x: int,
+    direction: int,
+    step: int,
+    left: int,
+    right: int,
+    width: int,
+) -> tuple[int, int]:
+    """自由走动：水平走一步并处理边缘掉头。
+
+    x         — 当前窗口左上角 x（全局坐标）
+    direction — -1 朝左，+1 朝右
+    step      — 每步像素
+    left/right — 可移动范围左右边界（含）：窗口可贴到 left，右缘贴 right
+    width     — 窗口宽度（右缘坐标 = x + width）
+
+    返回 (new_x, new_direction)：出界时钳回边界并反向，否则原方向前进。
+    窗口比可用区还宽（right - width <= left，退化）时钳到左缘原地停，
+    避免左右贴边来回抖动；窗口恢复窄于屏幕后自然继续走。
+    """
+    right_max = right - width
+    if right_max <= left:
+        return max(left, min(x, right_max)), direction
+    new_x = x + direction * step
+    if new_x <= left:
+        return left, 1
+    if new_x >= right_max:
+        return right_max, -1
+    return new_x, direction
