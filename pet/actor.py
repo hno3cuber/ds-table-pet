@@ -1,5 +1,5 @@
 from PySide6.QtCore import Property, QPoint, QPropertyAnimation, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from pet.geometry import scaled_size
@@ -7,6 +7,17 @@ from pet.geometry import scaled_size
 _HANDLE = 8          # 手柄绘制尺寸
 _HIT = 12            # 手柄命中区域
 _BREATH_MAX = 0.02   # 呼吸幅度 ±2%
+
+# 举牌姿态（token.png）中牌子文字的书写区：相对图片尺寸的归一化矩形。
+# 由 token.png（1728x2432）实测：牌面 x 512..1203 / y 1115..1483，
+# 内缩避开圆角与手指压痕，取保守安全区。
+_SIGN_TEXT_L = 0.305
+_SIGN_TEXT_R = 0.690
+_SIGN_TEXT_T = 0.487
+_SIGN_TEXT_B = 0.576
+_SIGN_TEXT_COLOR = QColor(43, 62, 92)   # 深墨蓝：白底清晰且贴合冷色角色
+_SIGN_MAX_FONT_PX = 90                  # 牌面字号上限（原图像素）
+_SIGN_MIN_FONT_PX = 16
 
 
 class ActorWidget(QWidget):
@@ -21,6 +32,8 @@ class ActorWidget(QWidget):
         self._frame_index = 0
         self._mirror = False      # 朝右走时水平翻转（walk.gif 素材默认朝左）
         self._content_scale = 1.0  # 动画帧相对静态立绘的视觉大小修正（素材角色占比差异）
+        self._pose = None         # 举牌姿态图（如 token.png）；非空时优先于动画/静态立绘
+        self._sign_text = ""      # 姿态图上牌子里的文字
         self._breath_anim = QPropertyAnimation(self, b"breath", self)
         self._breath_anim.setDuration(3000)
         self._breath_anim.setStartValue(0.0)
@@ -104,6 +117,20 @@ class ActorWidget(QWidget):
             self._mirror = on
             self.update()
 
+    def set_pose(self, pixmap, text: str = ""):
+        """切换到举牌姿态：pixmap 非空时用它替代立绘/动画，并把 text 画在牌子区域。
+
+        传 None 退出姿态，回到原来的动画/静态立绘绘制路径。"""
+        self._pose = pixmap
+        self._sign_text = text or ""
+        self.update()
+
+    def set_sign_text(self, text: str):
+        """只更新牌面文字（姿态未激活时忽略）。"""
+        if self._pose is not None:
+            self._sign_text = text or ""
+            self.update()
+
     def _content_rect(self, src_w: int, src_h: int):
         """动画帧的适配矩形：保持源宽高比放进 widget、贴底水平居中。
 
@@ -134,6 +161,43 @@ class ActorWidget(QWidget):
             painter.drawPixmap(rect, frame, QRect(frame.rect()))
         painter.restore()
 
+    def _paint_pose(self, painter: QPainter):
+        """绘制举牌姿态：整幅姿态图贴底居中适配，再把文字写入牌子区域。"""
+        pose = self._pose
+        rect = self._content_rect(pose.width(), pose.height())
+        painter.drawPixmap(rect, pose, QRect(pose.rect()))
+        if not self._sign_text:
+            return
+        sign = QRect(
+            rect.left() + round(rect.width() * _SIGN_TEXT_L),
+            rect.top() + round(rect.height() * _SIGN_TEXT_T),
+            round(rect.width() * (_SIGN_TEXT_R - _SIGN_TEXT_L)),
+            round(rect.height() * (_SIGN_TEXT_B - _SIGN_TEXT_T)),
+        )
+        self._draw_sign_text(painter, sign, self._sign_text)
+
+    def _draw_sign_text(self, painter: QPainter, rect: QRect, text: str):
+        """在牌子区域内绘制文字：多行居中，字号自适应到不溢出不超上限。"""
+        lines = text.split("\n")
+        size = min(_SIGN_MAX_FONT_PX,
+                   max(_SIGN_MIN_FONT_PX, int(rect.height() / max(1, len(lines)) * 0.6)))
+        while size > _SIGN_MIN_FONT_PX:
+            font = QFont()
+            font.setPixelSize(size)
+            font.setBold(True)
+            metrics = QFontMetricsF(font)
+            widest = max(metrics.horizontalAdvance(line) for line in lines)
+            total_h = metrics.height() * len(lines)
+            if widest <= rect.width() * 0.92 and total_h <= rect.height() * 1.05:
+                break
+            size -= 2
+        font = QFont()
+        font.setPixelSize(size)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(_SIGN_TEXT_COLOR)
+        painter.drawText(rect, Qt.AlignCenter | Qt.TextWordWrap, text)
+
     def _paint_static(self, painter: QPainter):
         breath_factor = 1.0 + (self._breath - 0.5) * 2 * _BREATH_MAX
         scaled = QPixmap(self._pixmap.size())
@@ -149,7 +213,9 @@ class ActorWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        if self._frames:
+        if self._pose is not None:
+            self._paint_pose(painter)
+        elif self._frames:
             self._paint_animation_frame(painter)
         else:
             self._paint_static(painter)

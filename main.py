@@ -31,6 +31,7 @@ CONFIG_PATH = str(_config_dir() / "config.json")
 PLUGINS_DIR = str(_resource_base() / "plugins")
 PIXMAP_PATH = str(_resource_base() / "picture" / "idel.gif")   # 站立循环动画（首帧兼作窗口尺寸基准）
 WALK_PATH = str(_resource_base() / "picture" / "walk.gif")
+TOKEN_PATH = str(_resource_base() / "picture" / "token.png")   # 举牌姿态（查余额用）
 
 
 def load_pixmap(path: str) -> QPixmap:
@@ -107,6 +108,11 @@ def main():
     walk_frames, _ = load_gif_frames(WALK_PATH)              # 空 → 无行走，wander 自动关
     window = build_window(pixmap, config, idle_frames=idle_frames,
                           idle_delays=idle_delays, walk_frames=walk_frames)
+    # 举牌姿态图（可选）：缺失不影响启动，仅“查看余额”菜单项不生效
+    try:
+        window.set_pose_pixmap(load_pixmap(TOKEN_PATH))
+    except FileNotFoundError:
+        pass
     mgr = install_plugins(window, config)
     window.show()
     window.installEventFilter(_StateSaver(window, config))

@@ -1,10 +1,12 @@
 import random
+from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QVBoxLayout, QWidget
 
 from pet.actor import ActorWidget
+from pet.balance import BalanceFetcher
 from pet.geometry import (
     anchor_and_topleft,
     corner_resize_size,
@@ -38,6 +40,9 @@ class PetWindow(QWidget):
         self._config = config
         self._press_global = None
         self._launch_ring = LaunchRing(config)
+        self._pose_pixmap = None        # 举牌姿态图（token.png），由 main 启动时注入
+        self._balance_fetcher = None    # 惰性创建：首次查看余额时实例化
+        self._balance_mode = False      # 当前是否处于举牌查余额姿态
         base = float(config.get("window.scale", 1.0))
         # 自由宽高比：scale_x/scale_y 各自独立（缺失/未设置时回退到等比 scale）
         sx = config.get("window.scale_x")
@@ -117,6 +122,10 @@ class PetWindow(QWidget):
         p = self.pos()
         return [p.x(), p.y()]
 
+    def set_pose_pixmap(self, pixmap):
+        """注入举牌姿态图（token.png）。"""
+        self._pose_pixmap = pixmap
+
     def install_plugin(self, plugin):
         self._plugins.append(plugin)
         self._hud.add_block(plugin.panel(self._hud))
@@ -130,6 +139,40 @@ class PetWindow(QWidget):
             self._halt_wander()
         else:
             self._resume_wander()
+
+    # ---- 余额姿态 ----
+    def toggle_balance(self):
+        """切换举牌查余额姿态：开 → 切姿态并异步查询；关 → 回常态动画。"""
+        if self._balance_mode:
+            self.exit_balance()
+        else:
+            self.enter_balance()
+
+    def enter_balance(self):
+        """进入举牌姿态：站定，显示查询中，发起异步余额请求。"""
+        if self._pose_pixmap is None:
+            return
+        self._balance_mode = True
+        self._halt_wander()                 # 举牌时站定，不再溜达
+        self._actor.set_pose(self._pose_pixmap, "查询中…")
+        self._actor.set_breathing(False)    # 牌面文字不跟着呼吸缩放
+        if self._balance_fetcher is None:
+            base_dir = Path(__file__).resolve().parent.parent
+            self._balance_fetcher = BalanceFetcher(base_dir, self)
+            self._balance_fetcher.finished.connect(self._on_balance_result)
+        self._balance_fetcher.fetch()
+
+    def exit_balance(self):
+        """退出举牌姿态：恢复动画/静态立绘，并按当前设置恢复走动。"""
+        self._balance_mode = False
+        self._actor.set_pose(None)
+        self._actor.set_breathing(self._breathing)
+        self._resume_wander()
+
+    def _on_balance_result(self, text: str, ok: bool):
+        """余额返回：仅当仍处于举牌姿态时刷新牌面。"""
+        if self._balance_mode:
+            self._actor.set_sign_text(text)
 
     # ---- 缩放（PPT 式角点拖拽：对角固定，宽高自由，Shift 锁等比） ----
     def _enter_resize_mode(self):
@@ -304,6 +347,8 @@ class PetWindow(QWidget):
         action_wander.setCheckable(True)
         action_wander.setChecked(self._wander_enabled)
         action_resize = menu.addAction("调整大小")
+        balance_text = "关闭余额牌" if self._balance_mode else "查看余额"
+        action_balance = menu.addAction(balance_text)
         menu.addSeparator()
         action_quit = menu.addAction("退出")
         chosen = menu.exec(global_pos)
@@ -318,6 +363,8 @@ class PetWindow(QWidget):
                 self._exit_resize_mode()
             else:
                 self._enter_resize_mode()
+        elif chosen is action_balance:
+            self.toggle_balance()
         elif chosen is action_quit:
             self._quit()
 
