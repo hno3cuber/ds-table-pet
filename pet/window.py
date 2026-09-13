@@ -104,7 +104,7 @@ class PetWindow(QWidget):
         self.resize(w, h)
         pos = self._config.get("window.pos", [100, 100])
         self.move(pos[0], pos[1])
-        wander_on = bool(config.get("wander.enabled", True)) and bool(self._walk_frames)
+        wander_on = bool(config.get("wander.enabled", False)) and bool(self._walk_frames)
         if wander_on:
             self.set_wander_enabled(True)   # 进站立循环并随机排走
         else:
