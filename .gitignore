@@ -10,13 +10,18 @@ config.json
 deepseek_key.txt
 tmp_*.py
 
+# 本地启动脚本（个人环境专用）
+run.bat
+
 # 打包产物
 build/
 dist/
-*.spec
+# 注意：*.spec 不忽略 —— ds_table_pet.spec 是项目打包配置（依赖声明、资源清单），
+# 属于仓库资产，PACKAGING.md 的打包流程依赖它，缺失会导致换机重踩打包坑。
 .wheels/
 
 # 沙盒残留目录（防 git add -A 误入）
+.tmp/
 .pytest-tmp-*/
 .pip-tmp/
 .pytest_tmp/

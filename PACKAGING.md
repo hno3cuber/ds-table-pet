@@ -34,7 +34,7 @@ python -m venv .venv
 
 ### 3. 打包
 
-> 若还没有 `ds_table_pet.spec`（本仓不跟踪它），先按第五节「spec 说明」生成一份再继续。
+> `ds_table_pet.spec` 已纳入版本控制，clone 下来即用，无需另行生成。
 
 ```powershell
 .\.venv\Scripts\pyinstaller.exe --noconfirm --clean ds_table_pet.spec
@@ -81,13 +81,24 @@ ValueError: Received icon image '...\icon.png' which exists but is not in the co
 检查 `dist\ds-table-pet\_internal\` 下是否有 `picture\`（四个素材）和 `plugins\system_monitor\`。
 缺失通常是 spec 的 `datas` 项被改动所致。
 
+### 面板空白 / 插件「消失」
+
+CPU / GPU 面板为空、或只剩个空壳面板，通常是 `system_monitor` 插件在运行期加载失败被跳过。
+插件经 `importlib` 动态加载，PyInstaller 静态分析看不到其 `psutil` / `pynvml` 依赖，
+spec 必须用 `hiddenimports` 显式声明（见 `ds_table_pet.spec`）。
+
+排查顺序：
+
+1. 看 exe 同目录有无 `ds-table-pet.log`，里面有插件加载失败的完整 traceback
+2. 检查 `dist\ds-table-pet\_internal\` 下是否有 `psutil\`；`pynvml` 为纯 Python 模块，进 `base_library.zip`，目录里搜不到属正常
+
 ---
 
 ## 五、原理速查
 
 | 内容 | 位置 / 说明 |
 | --- | --- |
-| 打包配置 | `ds_table_pet.spec`（项目根目录，**本仓不纳入版本控制**，见下方“spec 说明”） |
+| 打包配置 | `ds_table_pet.spec`（项目根目录，**随仓库分发**，构建脚本而非产物，勿加回 `.gitignore`） |
 | 入口 | `main.py` |
 | exe 图标 | `picture/icon.png`（编译期嵌入 exe，需 Pillow 转换） |
 | 运行时资源 | `picture/`、`plugins/` → 打进 `_internal/`，由 `main.py` 的 `sys._MEIPASS` 逻辑定位 |
@@ -97,47 +108,16 @@ ValueError: Received icon image '...\icon.png' which exists but is not in the co
 
 ### spec 说明
 
-本仓库的 `.gitignore` 排除了 `*.spec`，**打包配置不入库**。`ds_table_pet.spec` 仅存在于本地，重打包直接用；
-若换了机器、文件丢失，按下表重新生成一份同名 spec 即可：
+`ds_table_pet.spec` 是构建配置，**已纳入版本控制**，clone 下来直接用它打包即可。
+它是唯一的真相源：需要改打包行为就改这个文件，不要在别处维护副本，
+否则两份配置会漂移（曾因此导致插件依赖漏打、面板空白）。
+
+其中与动态插件相关的关键一条：
 
 ```python
-# -*- mode: python ; coding: utf-8 -*-
-from pathlib import Path
-
-ROOT = Path(SPECPATH)
-
-datas = [
-    (str(ROOT / "picture"), "picture"),
-    (str(ROOT / "plugins"), "plugins"),
-]
-
-a = Analysis(
-    ["main.py"],
-    pathex=[str(ROOT)],
-    binaries=[],
-    datas=datas,
-    hiddenimports=[],
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=["pytest"],
-    noarchive=False,
-)
-
-pyz = PYZ(a.pure)
-
-exe = EXE(
-    pyz, a.scripts, [],
-    exclude_binaries=True,
-    name="ds-table-pet",
-    debug=False,
-    strip=False,
-    upx=False,
-    console=False,
-    icon=str(ROOT / "picture" / "icon.png"),
-)
-
-coll = COLLECT(exe, a.binaries, a.datas, name="ds-table-pet")
+# 插件由运行期 importlib.util 加载，静态分析看不到其依赖，必须显式声明。
+# 注意 nvidia-ml-py 的发行名与导入名不同：import 名是 pynvml。
+hiddenimports = ["psutil", "pynvml"]
 ```
 
 ## 六、瘦身（可选）

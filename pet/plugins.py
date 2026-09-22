@@ -1,8 +1,36 @@
 import importlib.util
-import sys
 from pathlib import Path
 
+from pet.logging import log_error
 from pet.plugin import Plugin
+
+
+class PluginLoadFailure:
+    """加载失败的插件占位：面板上给一行可见提示，不再静默消失。"""
+
+    def __init__(self, entry_name: str, reason: str):
+        self.id = f"failed:{entry_name}"
+        self.name = f"{entry_name} 加载失败"
+        self.reason = reason
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def poll(self) -> dict:
+        return {}
+
+    def set_paused(self, paused: bool):
+        pass
+
+    def panel(self, parent):
+        from pet.hud import OutlinedLabel
+
+        label = OutlinedLabel(f"{self.name}", parent)
+        label.setToolTip(self.reason)
+        return label
 
 
 class PluginManager:
@@ -32,7 +60,9 @@ class PluginManager:
                     continue
                 inst = self.factory(plugin_class)
             except Exception as e:
-                print(f"[plugin] skip broken plugin: {entry.name}: {e}", file=sys.stderr)
+                # 吞掉会让故障彻底无声（打包后 stderr 还是黑洞），必须落盘 + 面板可见
+                log_error(f"plugin load failed: {entry.name}", e)
+                instances.append(PluginLoadFailure(entry.name, f"{type(e).__name__}: {e}"))
                 continue
             instances.append(inst)
         self.instances = instances
