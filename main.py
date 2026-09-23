@@ -32,6 +32,7 @@ PLUGINS_DIR = str(_resource_base() / "plugins")
 PIXMAP_PATH = str(_resource_base() / "picture" / "idel.gif")   # 站立循环动画（首帧兼作窗口尺寸基准）
 WALK_PATH = str(_resource_base() / "picture" / "walk.gif")
 TOKEN_PATH = str(_resource_base() / "picture" / "token.png")   # 举牌姿态（查余额用）
+DIZZY_PATH = str(_resource_base() / "picture" / "yunhuhu.gif")  # 晕乎乎动画（甩动后播放，缺失则功能静默关闭）
 
 
 def load_pixmap(path: str) -> QPixmap:
@@ -62,9 +63,11 @@ def load_gif_frames(path: str) -> tuple:
 
 
 def build_window(pixmap: QPixmap, config: Config, idle_frames=None,
-                 idle_delays=None, walk_frames=None) -> PetWindow:
+                 idle_delays=None, walk_frames=None,
+                 dizzy_frames=None, dizzy_delays=None) -> PetWindow:
     return PetWindow(pixmap, config, idle_frames=idle_frames,
-                     idle_delays=idle_delays, walk_frames=walk_frames)
+                     idle_delays=idle_delays, walk_frames=walk_frames,
+                     dizzy_frames=dizzy_frames, dizzy_delays=dizzy_delays)
 
 
 def install_plugins(window: PetWindow, config: Config):
@@ -106,8 +109,10 @@ def main():
     pixmap = load_pixmap(PIXMAP_PATH)
     idle_frames, idle_delays = load_gif_frames(PIXMAP_PATH)  # 站立循环动画
     walk_frames, _ = load_gif_frames(WALK_PATH)              # 空 → 无行走，wander 自动关
+    dizzy_frames, dizzy_delays = load_gif_frames(DIZZY_PATH)  # 空 → 晕乎乎整体静默关闭
     window = build_window(pixmap, config, idle_frames=idle_frames,
-                          idle_delays=idle_delays, walk_frames=walk_frames)
+                          idle_delays=idle_delays, walk_frames=walk_frames,
+                          dizzy_frames=dizzy_frames, dizzy_delays=dizzy_delays)
     # 举牌姿态图（可选）：缺失不影响启动，仅“查看余额”菜单项不生效
     try:
         window.set_pose_pixmap(load_pixmap(TOKEN_PATH))
