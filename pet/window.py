@@ -32,13 +32,13 @@ _WALK_VISUAL_SCALE = 0.955
 _WANDER_IDLE_MS = (2000, 6000)     # 站立随机时长范围
 _WANDER_WALK_MS = (4000, 10000)    # 连续行走随机时长范围
 _WANDER_QUIET_MS = (10000, 14000)  # 用户触摸打断后的安静期范围（给操作留空间）
-_DIZZY_LOOPS = 3                # 晕乎乎动画循环次数，播完回站立
+_DIZZY_LOOPS = 1                # 晕乎乎动画播放遍数：一整段播完即回站立（想多看几遍往上加）
 _DIZZY_FRAME_MS = 100           # 晕乎乎帧停留兜底：yunhuhu.gif 未带延迟信息时回退
 _DIZZY_COOLDOWN_MS = 800        # 一次晕乎乎结束后的冷却：防止刚播完又被触发，动画来回打架
-_DIZZY_ONSET_DELAY_MS = 250     # 松手后的确认拍：这段时间内没有再按下，才真正进入晕乎乎
+_DIZZY_ONSET_DELAY_MS = 0       # 松手后等多久才进晕乎乎：0 = 松手即晕（想留一拍就填 250 之类）
 # 晕乎乎帧视觉大小修正（对齐 _WALK_VISUAL_SCALE 的用法）：实跑调校结果——
-# 1.0 偏小、1.2 偏大，取 1.15。嫌小往上加，嫌大往下调。
-_DIZZY_VISUAL_SCALE = 1.11
+# 1.0 偏小、1.2 偏大，当前取 1.05。嫌小往上加，嫌大往下调。
+_DIZZY_VISUAL_SCALE = 1.05
 
 
 def _monotonic_ms() -> int:
@@ -110,7 +110,7 @@ class PetWindow(QWidget):
         self._dizzy_timer.setTimerType(Qt.PreciseTimer)
         self._dizzy_timer.setSingleShot(True)
         self._dizzy_timer.timeout.connect(self._dizzy_tick)
-        self._dizzy_onset_timer = QTimer(self)  # 松手确认拍：连抓带松时不误判，隔一拍才晕
+        self._dizzy_onset_timer = QTimer(self)  # 晕乎乎触发计时：按 _DIZZY_ONSET_DELAY_MS 延迟进入
         self._dizzy_onset_timer.setTimerType(Qt.PreciseTimer)
         self._dizzy_onset_timer.setSingleShot(True)
         self._dizzy_onset_timer.timeout.connect(self._enter_dizzy_after_onset)

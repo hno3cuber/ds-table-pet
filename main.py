@@ -33,6 +33,7 @@ PIXMAP_PATH = str(_resource_base() / "picture" / "idel.gif")   # 站立循环动
 WALK_PATH = str(_resource_base() / "picture" / "walk.gif")
 TOKEN_PATH = str(_resource_base() / "picture" / "token.png")   # 举牌姿态（查余额用）
 DIZZY_PATH = str(_resource_base() / "picture" / "yunhuhu.gif")  # 晕乎乎动画（甩动后播放，缺失则功能静默关闭）
+_DIZZY_SKIP_FRAMES = 0   # 晕乎乎素材开头的前 N 帧（起手过渡帧）不参与播放；0 = 不跳，整段播
 
 
 def load_pixmap(path: str) -> QPixmap:
@@ -110,6 +111,11 @@ def main():
     idle_frames, idle_delays = load_gif_frames(PIXMAP_PATH)  # 站立循环动画
     walk_frames, _ = load_gif_frames(WALK_PATH)              # 空 → 无行走，wander 自动关
     dizzy_frames, dizzy_delays = load_gif_frames(DIZZY_PATH)  # 空 → 晕乎乎整体静默关闭
+    # 素材开头的前 _DIZZY_SKIP_FRAMES 帧是起手过渡，连同其帧延迟一起丢掉（0 = 整段播）；
+    # 帧数不够时原样保留，避免把动画剪空导致功能静默失效
+    if _DIZZY_SKIP_FRAMES > 0 and len(dizzy_frames) > _DIZZY_SKIP_FRAMES:
+        dizzy_frames = dizzy_frames[_DIZZY_SKIP_FRAMES:]
+        dizzy_delays = dizzy_delays[_DIZZY_SKIP_FRAMES:]
     window = build_window(pixmap, config, idle_frames=idle_frames,
                           idle_delays=idle_delays, walk_frames=walk_frames,
                           dizzy_frames=dizzy_frames, dizzy_delays=dizzy_delays)
