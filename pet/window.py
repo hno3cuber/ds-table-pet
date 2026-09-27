@@ -1,4 +1,5 @@
 import random
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QTimer
@@ -16,7 +17,9 @@ from pet.geometry import (
     wander_step_x,
 )
 from pet.hud import HudPanel
+from pet.idle import system_idle_ms
 from pet.launch_ring import LaunchRing
+from pet.shake import ShakeDetector
 
 _CLICK_THRESHOLD = 6     # press 与 release 位移小于该值视为「点击」（弹出快捷环）
 _MIN_SCALE = 0.1          # 单方向最小缩放系数
@@ -30,11 +33,31 @@ _WALK_VISUAL_SCALE = 0.955
 _WANDER_IDLE_MS = (2000, 6000)     # 站立随机时长范围
 _WANDER_WALK_MS = (4000, 10000)    # 连续行走随机时长范围
 _WANDER_QUIET_MS = (10000, 14000)  # 用户触摸打断后的安静期范围（给操作留空间）
+_DIZZY_LOOPS = 1                # 晕乎乎动画播放遍数：一整段播完即回站立（想多看几遍往上加）
+_DIZZY_FRAME_MS = 100           # 晕乎乎帧停留兜底：yunhuhu.gif 未带延迟信息时回退
+_DIZZY_COOLDOWN_MS = 800        # 一次晕乎乎结束后的冷却：防止刚播完又被触发，动画来回打架
+_DIZZY_ONSET_DELAY_MS = 0       # 松手后等多久才进晕乎乎：0 = 松手即晕（想留一拍就填 250 之类）
+# 晕乎乎帧视觉大小修正（对齐 _WALK_VISUAL_SCALE 的用法）：实跑调校结果——
+# 1.0 偏小、1.2 偏大，当前取 1.05。嫌小往上加，嫌大往下调。
+_DIZZY_VISUAL_SCALE = 1.05
+_TIRED_AFTER_MS = 60_000        # 无键鼠输入满多久后进入犯困动画（一分钟）
+_TIRED_POLL_MS = 500            # 系统空闲轮询间隔：兼顾及时唤醒与开销
+_TIRED_FRAME_MS = 100           # 犯困帧停留兜底：tired.gif 未带延迟信息时回退
+# 犯困帧视觉大小修正（对齐 _WALK_VISUAL_SCALE 的用法）：犯困属站立变体，
+# 默认与立绘等高；素材角色占比不同时按需微调（嫌小往上、嫌大往下）。
+_TIRED_VISUAL_SCALE = 1.0
+
+
+def _monotonic_ms() -> int:
+    """单调时钟毫秒：甩动检测的时间基准，不受系统校时/时区调整影响。"""
+    return int(time.monotonic() * 1000)
 
 
 class PetWindow(QWidget):
     def __init__(self, pixmap: QPixmap, config, poses=None,
-                 idle_frames=None, idle_delays=None, walk_frames=None):
+                 idle_frames=None, idle_delays=None, walk_frames=None,
+                 dizzy_frames=None, dizzy_delays=None,
+                 tired_frames=None, tired_delays=None):
         super().__init__()
         self._pixmap = pixmap
         self._config = config
@@ -83,6 +106,36 @@ class PetWindow(QWidget):
         self._hold_timer = QTimer(self)  # 站/走时长单发计时：到点后状态轮转
         self._hold_timer.setSingleShot(True)
         self._hold_timer.timeout.connect(self._on_wander_hold)
+        # 晕乎乎（甩动彩蛋）：帧来自 yunhuhu.gif 内存拆帧，无素材则功能整体静默关闭
+        self._dizzy_frames = list(dizzy_frames) if dizzy_frames else None
+        self._dizzy_delays = list(dizzy_delays) if dizzy_delays else None   # 每帧停留（ms）
+        self._dizzy = False                    # 当前是否处于晕乎乎播放中
+        self._dizzy_frame = 0                  # 当前播放帧索引
+        self._dizzy_loop = 0                   # 已完成的循环轮数
+        self._dizzy_detector = ShakeDetector()  # 甩动检测：拖拽轨迹里数方向反转
+        self._dizzy_cooldown_until_ms = 0      # 冷却截止（单调时钟毫秒）
+        self._dizzy_timer = QTimer(self)  # 晕乎乎帧切换：单发，每 tick 按素材帧延迟重排下一次
+        self._dizzy_timer.setTimerType(Qt.PreciseTimer)
+        self._dizzy_timer.setSingleShot(True)
+        self._dizzy_timer.timeout.connect(self._dizzy_tick)
+        self._dizzy_onset_timer = QTimer(self)  # 晕乎乎触发计时：按 _DIZZY_ONSET_DELAY_MS 延迟进入
+        self._dizzy_onset_timer.setTimerType(Qt.PreciseTimer)
+        self._dizzy_onset_timer.setSingleShot(True)
+        self._dizzy_onset_timer.timeout.connect(self._enter_dizzy_after_onset)
+        # 犯困（长时间无键鼠输入）：帧来自 tired.gif 内存拆帧，无素材则功能整体静默关闭
+        self._tired_frames = list(tired_frames) if tired_frames else None
+        self._tired_delays = list(tired_delays) if tired_delays else None
+        self._tired = False                    # 当前是否处于犯困循环中
+        self._tired_frame = 0                  # 当前播放帧索引
+        self._tired_timer = QTimer(self)  # 犯困帧切换：单发，每 tick 按素材帧延迟重排下一次
+        self._tired_timer.setTimerType(Qt.PreciseTimer)
+        self._tired_timer.setSingleShot(True)
+        self._tired_timer.timeout.connect(self._tired_frame_tick)
+        self._idle_watch = QTimer(self)   # 系统空闲轮询：判断进入/退出犯困
+        self._idle_watch.setInterval(_TIRED_POLL_MS)
+        self._idle_watch.timeout.connect(self._poll_idle)
+        if self._tired_frames:
+            self._idle_watch.start()
 
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -136,6 +189,7 @@ class PetWindow(QWidget):
             plugin.set_paused(paused)
         self._hud.show_paused(paused)
         if paused:
+            self._abort_dizzy()  # 晕乎乎让位：安全收尾（不写冷却、不触发恢复）
             self._halt_wander()
         else:
             self._resume_wander()
@@ -153,6 +207,7 @@ class PetWindow(QWidget):
         if self._pose_pixmap is None:
             return
         self._balance_mode = True
+        self._abort_dizzy()                 # 晕乎乎让位：安全收尾（不写冷却、不触发恢复）
         self._halt_wander()                 # 举牌时站定，不再溜达
         self._actor.set_pose(self._pose_pixmap, "查询中…")
         self._actor.set_breathing(False)    # 牌面文字不跟着呼吸缩放
@@ -177,6 +232,7 @@ class PetWindow(QWidget):
     # ---- 缩放（PPT 式角点拖拽：对角固定，宽高自由，Shift 锁等比） ----
     def _enter_resize_mode(self):
         """进入缩放模式：显示选框与手柄，等待用户按角点。"""
+        self._abort_dizzy()  # 晕乎乎让位：安全收尾（不写冷却、不触发恢复）
         self._halt_wander()  # 用户开始操作本体：行走让位
         self._resize_mode = True
         self._actor.set_resize_mode(True)
@@ -263,8 +319,12 @@ class PetWindow(QWidget):
 
     # ---- 鼠标事件 ----
     def mousePressEvent(self, event):
+        self._wake_from_tired()  # 用户操作本体：立即从犯困醒来，不等轮询
         if event.button() == Qt.RightButton:
-            self._interrupt_wander()
+            self._dizzy_onset_timer.stop()  # 用户又伸手：取消松手后待触发的晕乎乎
+            # 晕乎乎播放中不 _interrupt_wander（会把 dizzy 动画顶掉），菜单照常弹出
+            if not self._dizzy:
+                self._interrupt_wander()
             self._show_menu(event.globalPosition().toPoint())
             return
         if event.button() != Qt.LeftButton:
@@ -276,24 +336,41 @@ class PetWindow(QWidget):
                 self._begin_resize(corner, event.globalPosition().toPoint())
                 self._drag_offset = None
                 return
-        self._interrupt_wander()  # 用户伸手：停走进入安静期
+        # 晕乎乎播放中不 _interrupt_wander（会打断动画），但仍记录拖拽偏移，
+        # 用户可以把晕着的角色拖去别处
+        self._dizzy_onset_timer.stop()  # 用户又按下：取消松手后待触发的晕乎乎
+        if not self._dizzy:
+            self._interrupt_wander()  # 用户伸手：停走进入安静期
+        self._dizzy_detector.reset()  # 新一轮拖拽：甩动检测从零开始
         self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
         self._press_global = event.globalPosition().toPoint()
         self._resize_corner = None
 
     def mouseMoveEvent(self, event):
+        self._wake_from_tired()  # 拖拽即输入：立即从犯困醒来
         if self._resize_corner is not None:
             keep_aspect = bool(event.modifiers() & Qt.ShiftModifier)
             self._apply_resize(event.globalPosition().toPoint(), keep_aspect)
             return
         if self._drag_offset is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            cursor = event.globalPosition().toPoint()
+            self.move(cursor - self._drag_offset)
+            # 本体拖拽轨迹喂甩动检测（角点缩放拖拽走不到这里）；
+            # dizzy 播放中不累计：动画期间不再重开新一轮
+            if not self._dizzy:
+                self._dizzy_detector.feed(cursor.x(), cursor.y(), _monotonic_ms())
 
     def mouseReleaseEvent(self, event):
         if event.button() != Qt.LeftButton:
             return
         if self._resize_corner is not None:
             self._finish_resize()
+        # 本体拖拽收尾：甩动达标 → 先起一个确认拍，隔一拍再进晕乎乎（期间又按下则作罢）。
+        # _drag_offset 非空保证这是本体拖拽而非角点缩放收尾；甩动位移远超点击阈值，
+        # 与下方点击判定天然互斥
+        if (self._drag_offset is not None and not self._dizzy
+                and self._dizzy_detector.release(_monotonic_ms())):
+            self._dizzy_onset_timer.start(_DIZZY_ONSET_DELAY_MS)
         # 点击判定：press 与 release 几乎没位移 → 弹出/收起快捷环
         if self._resize_corner is None and self._press_global is not None:
             delta = event.globalPosition().toPoint() - self._press_global
@@ -303,6 +380,7 @@ class PetWindow(QWidget):
         self._drag_offset = None
 
     def keyPressEvent(self, event):
+        self._wake_from_tired()  # 键盘输入即唤醒
         if event.key() == Qt.Key_Escape and self._resize_mode:
             self._exit_resize_mode()
         else:
@@ -383,6 +461,8 @@ class PetWindow(QWidget):
 
         没有行走帧素材时（旧调用/资源缺失）走动保持关闭；站立循环由 idle 素材
         独立驱动（无 idle 素材则回静态立绘）。"""
+        self._abort_dizzy()  # 晕乎乎让位：安全收尾（不写冷却、不触发恢复）
+        self._abort_tired()  # 犯困让位：安全收尾（不触发站/走恢复）
         self._wander_enabled = bool(enabled) and bool(self._walk_frames)
         self._walking = False
         self._walk_timer.stop()
@@ -394,6 +474,10 @@ class PetWindow(QWidget):
 
     def _show_idle_animation(self):
         """站立显示：有 idle 循环素材则播放（按素材帧延迟），否则回静态立绘。"""
+        if self._dizzy:
+            return  # 晕乎乎播放中：站立循环不得顶掉 dizzy 动画
+        if self._tired:
+            return  # 犯困播放中：站立循环不得顶掉犯困动画
         self._walking = False
         self._walk_timer.stop()
         self._frame_timer.stop()
@@ -425,12 +509,13 @@ class PetWindow(QWidget):
         self._idle_timer.start(self._idle_delay_ms())
 
     def _halt_wander(self):
-        """临时冻结：停走与站立循环，回静态立绘（暂停监控/缩放模式用）。"""
+        """临时冻结：停走、站立循环与犯困，回静态立绘（暂停监控/缩放模式用）。"""
         self._walking = False
         self._walk_timer.stop()
         self._frame_timer.stop()
         self._idle_timer.stop()
         self._hold_timer.stop()
+        self._abort_tired()  # 犯困让位：安全收尾（不触发站/走恢复）
         self._actor.set_animation_frames(None)
         self._actor.set_mirror(False)
         self._actor.set_breathing(self._breathing)
@@ -444,6 +529,10 @@ class PetWindow(QWidget):
 
     def _enter_idle(self, delay_ms: int = None):
         """进入站立：播放站立循环，delay 后自动转行走（默认随机时长）。"""
+        if self._dizzy:
+            return  # 晕乎乎播放中：站立循环不得顶掉 dizzy 动画
+        if self._tired:
+            return  # 犯困播放中：站立循环不得顶掉犯困动画
         self._walking = False
         self._frame_timer.stop()
         self._show_idle_animation()
@@ -509,3 +598,149 @@ class PetWindow(QWidget):
         n = len(self._walk_frames)
         self._wander_frame = (self._wander_frame + 1) % n
         self._actor.set_frame_index(self._wander_frame)
+
+    # ---- 晕乎乎（被甩后的彩蛋动画：循环 _DIZZY_LOOPS 次回站立） ----
+
+    def _enter_dizzy_after_onset(self):
+        """松手确认拍到点：期间用户没有再按下 → 真正进入晕乎乎。"""
+        self.enter_dizzy()
+
+    def enter_dizzy(self):
+        """进入晕乎乎：甩动达标后播放 yunhuhu.gif，播满 _DIZZY_LOOPS 轮回站立。
+
+        前置条件任一不满足则静默忽略：无素材 / 播放中 / 暂停 / 缩放模式 /
+        举牌姿态 / 冷却未过。素材缺失时本方法恒为无操作，其余行为不受影响。"""
+        if not self._dizzy_frames:
+            return
+        if self._dizzy or self._paused or self._resize_mode or self._balance_mode:
+            return
+        if self._tired:
+            return
+        if _monotonic_ms() < self._dizzy_cooldown_until_ms:
+            return
+        self._dizzy = True
+        self._dizzy_frame = 0
+        self._dizzy_loop = 0
+        # 停掉站/走相关计时：晕乎乎独占动画输出，播放期间不再随机站走
+        self._walking = False
+        self._walk_timer.stop()
+        self._frame_timer.stop()
+        self._idle_timer.stop()
+        self._hold_timer.stop()
+        self._actor.set_animation_frames(self._dizzy_frames, _DIZZY_VISUAL_SCALE)
+        self._actor.set_frame_index(0)
+        self._actor.set_breathing(False)   # 帧循环自带动感，不再叠呼吸缩放
+        self._actor.set_mirror(False)      # 晕乎乎不跟随行走朝向
+        self._dizzy_timer.start(self._dizzy_delay_ms())
+
+    def _dizzy_delay_ms(self) -> int:
+        """当前晕乎乎帧的停留时长：素材帧延迟优先，缺失回退默认。"""
+        if self._dizzy_delays:
+            return max(16, self._dizzy_delays[self._dizzy_frame % len(self._dizzy_delays)])
+        return _DIZZY_FRAME_MS
+
+    def _dizzy_tick(self):
+        """晕乎乎帧推进（单发重排）：回绕一次记一轮，播满 _DIZZY_LOOPS 轮退出。"""
+        if not self._dizzy or not self._dizzy_frames:
+            return
+        n = len(self._dizzy_frames)
+        self._dizzy_frame += 1
+        if self._dizzy_frame >= n:
+            self._dizzy_frame = 0
+            self._dizzy_loop += 1
+            if self._dizzy_loop >= _DIZZY_LOOPS:
+                self.exit_dizzy()
+                return
+        self._actor.set_frame_index(self._dizzy_frame)
+        self._dizzy_timer.start(self._dizzy_delay_ms())
+
+    def exit_dizzy(self):
+        """播完退出：写冷却时间戳，按当前设置恢复站/走。"""
+        if not self._dizzy:
+            return
+        self._dizzy = False
+        self._dizzy_timer.stop()
+        self._dizzy_cooldown_until_ms = _monotonic_ms() + _DIZZY_COOLDOWN_MS
+        self._resume_wander()
+
+    def _abort_dizzy(self):
+        """内部安全收尾：仅停帧计时器并清标志，不写冷却、不触发站/走恢复。
+
+        供举牌/缩放/暂停/走动开关等路径调用：它们各自有恢复动作，
+        叠加 _resume_wander 会互相打架。"""
+        self._dizzy = False
+        self._dizzy_timer.stop()
+        self._dizzy_onset_timer.stop()  # 待触发的晕乎乎一并作罢
+
+    # ---- 犯困（长时间无键鼠输入：循环播放 tired.gif，有输入即醒） ----
+
+    def _wake_from_tired(self):
+        """本地输入即唤醒：不等轮询，立即退出犯困恢复正常动画。"""
+        if self._tired:
+            self.exit_tired()
+
+    def _poll_idle(self):
+        """系统空闲轮询：无键鼠输入达阈值 → 犯困；犯困中检测到输入 → 醒来。"""
+        idle = system_idle_ms()
+        if idle is None:
+            self._idle_watch.stop()   # 平台不支持：静默关闭犯困，其余行为不变
+            return
+        if self._tired:
+            if idle < _TIRED_AFTER_MS:
+                self.exit_tired()     # 检测到新输入：醒来回站立
+        elif idle >= _TIRED_AFTER_MS:
+            self.enter_tired()
+
+    def enter_tired(self):
+        """进入犯困：无键鼠输入满 _TIRED_AFTER_MS 后循环播放 tired.gif，直到再次有输入。
+
+        前置条件任一不满足则静默忽略：无素材 / 已在犯困 / 暂停 / 缩放模式 /
+        举牌姿态 / 晕乎乎播放中。素材缺失时本方法恒为无操作，其余行为不受影响。"""
+        if not self._tired_frames or self._tired:
+            return
+        if self._paused or self._resize_mode or self._balance_mode or self._dizzy:
+            return
+        self._tired = True
+        self._tired_frame = 0
+        # 停掉站/走相关计时：犯困独占动画输出，播放期间不再随机站走
+        self._walking = False
+        self._walk_timer.stop()
+        self._frame_timer.stop()
+        self._idle_timer.stop()
+        self._hold_timer.stop()
+        self._actor.set_animation_frames(self._tired_frames, _TIRED_VISUAL_SCALE)
+        self._actor.set_frame_index(0)
+        self._actor.set_breathing(False)   # 帧循环自带动感，不再叠呼吸缩放
+        self._actor.set_mirror(False)      # 犯困不跟随行走朝向
+        self._tired_timer.start(self._tired_delay_ms())
+
+    def _tired_delay_ms(self) -> int:
+        """当前犯困帧的停留时长：素材帧延迟优先，缺失回退默认。"""
+        if self._tired_delays:
+            return max(16, self._tired_delays[self._tired_frame % len(self._tired_delays)])
+        return _TIRED_FRAME_MS
+
+    def _tired_frame_tick(self):
+        """犯困帧推进（单发重排）：循环播放，不计轮数，直到被输入唤醒。"""
+        if not self._tired or not self._tired_frames:
+            return
+        n = len(self._tired_frames)
+        self._tired_frame = (self._tired_frame + 1) % n
+        self._actor.set_frame_index(self._tired_frame)
+        self._tired_timer.start(self._tired_delay_ms())
+
+    def exit_tired(self):
+        """有输入醒来：停犯困动画，按当前设置恢复站/走（回 idle）。"""
+        if not self._tired:
+            return
+        self._tired = False
+        self._tired_timer.stop()
+        self._resume_wander()
+
+    def _abort_tired(self):
+        """内部安全收尾：仅停帧计时器并清标志，不触发站/走恢复。
+
+        供暂停/缩放/举牌/走动开关等路径调用：它们各自有恢复动作，
+        叠加 _resume_wander 会互相打架。"""
+        self._tired = False
+        self._tired_timer.stop()
